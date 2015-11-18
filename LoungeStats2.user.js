@@ -163,12 +163,12 @@ function LoungeStatsClass(){
 			this.Settings[key].populateFormField();
 		}
 
-		var multiaccthing = '<div>' + this.appid == APP_CSGO ? 'CS:GO' : 'DotA' + ' Accounts</div>';
+		var multiaccthing = '<div>' + (this.Lounge.currentAppid == APP_CSGO ? 'CS:GO' : 'DotA') + ' Accounts</div>';
 
-		for(var i in this.Settings.accounts.getValue().aval[this.appid]) {
-			var bla = this.Settings.accounts.getValue().active[this.appid].indexOf(i) != -1 ? "checked" : "";
+		for(var i in this.Settings.accounts.getValue().aval[this.Lounge.currentAppid]) {
+			var bla = this.Settings.accounts.getValue().active[this.Lounge.currentAppid].indexOf(i) != -1 ? "checked" : "";
 
-			multiaccthing += '<input type="checkbox" name="'+i+'" '+bla+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.getValue().aval[this.appid][i]+'</a>"<br/>';
+			multiaccthing += '<input type="checkbox" name="'+i+'" '+bla+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.getValue().aval[this.Lounge.currentAppid][i]+'</a>"<br/>';
 		}
 		$('#loungestats_mergepicks').html(multiaccthing);
 
@@ -273,12 +273,8 @@ LoungeStatsClass.prototype = {
 			</div> \
 		</div>');
 
-		$('#loungestats_domerge').change(function() {
-			if($('#loungestats_domerge').val() == 1) {
-				$('#loungestats_settingswindow').addClass('accounts');
-			} else {
-				$('#loungestats_settingswindow').removeClass('accounts');
-			}
+		$('.loungestatsSetting#domerge').change(function() {
+			$('#loungestats_settingswindow').toggleClass('accounts', $('.loungestatsSetting#domerge').val() == 1);
 		});
 
 		new datepickr('beforedate', {
