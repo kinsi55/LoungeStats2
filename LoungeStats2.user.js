@@ -37,7 +37,18 @@ var newVersion = (GM_getValue('lastversion') != version);
 var APP_CSGO = '730';
 var APP_DOTA = '570';
 
+/**
+ * Broken out object for handling loading of item prices incase i should add / switch providers in the future
+ * @type {Object}
+ */
 var PriceProvider = {
+  /**
+   * Returns the price out of the cached price database if available
+   * @param  {integer}   appId    app id which this item belongs to
+   * @param  {String}   itemName name of the item wanted
+   * @param  {Function} callback callback function to pipe the price to
+   * @return {Float}            items price
+   */
   getPriceFor: function(appId, itemName, callback){
     if(!this.cache) throw "No prices cached...";
     if(!this.cache[appId][itemName]) throw "Requested item not found"; //Possibly report back and / or fallback to loading from market?
@@ -46,15 +57,15 @@ var PriceProvider = {
     callback(p);
     return p;
   },
+  /**
+   * Load the locally cached, or externally refreshed price DB in and load it into RAM
+   * @param  {Function} callback callback when done
+   */
   init: function(callback){
-    //Load & cache pricelist
     this.cache = GM_getValue('pricedb');
     if(this.cache) try{
       this.cache = JSON.parse(this.cache);
-    }catch(e){
-      console.log(e);
-      this.cache = null;
-    }
+    }catch(e){ this.cache = null; }
 
     if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
       //Aktuelle daten vom RAW Github laden, speichern
@@ -74,7 +85,18 @@ var PriceProvider = {
   }
 };
 
+/**
+ * Broken out object for handling currency conversion
+ * @type {Object}
+ */
 var ConversionRateProvider = {
+  /**
+   * Convert some price from one currency to another
+   * @param  {Float} amount        amount to convert
+   * @param  {String} to_currency   destination currency requested
+   * @param  {String} from_currency Source currency given, USD if not defined
+   * @return {Float}               converted amount
+   */
   convert: function(amount, to_currency, from_currency){
     if(!this.cache) throw "No prices cached...";
     if(!from_currency) from_currency = "USD";
@@ -83,15 +105,15 @@ var ConversionRateProvider = {
 
     return amount / this.cache.rates[from_currency] * this.cache.rates[to_currency];
   },
+  /**
+   * Load the locally cached, or externally refreshed rate DB in and load it into RAM
+   * @param  {Function} callback callback when done
+   */
   init: function(callback){
-    //Load & cache conversionrates
     this.cache = GM_getValue('convert_fixer');
     if(this.cache) try{
       this.cache = JSON.parse(this.cache);
-    }catch(e){
-      console.log(e);
-      this.cache = null;
-    }
+    }catch(e){ this.cache = null; }
 
     if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
       //Aktuelle daten vom RAW Github laden, speichern
@@ -116,25 +138,39 @@ var ConversionRateProvider = {
 
 
 //http://stackoverflow.com/a/5812341/3526458
+/**
+ * Check if the passed date is formatted validly
+ * @param  {String}  s date to check
+ * @return {Boolean}   result of the format check
+ */
 function isValidDate(s) {
   var bits = s.split('.');
   var d = new Date(bits[2], bits[1] - 1, bits[0]);
   return d && (d.getMonth() + 1) == bits[1] && d.getDate() == Number(bits[0]);
 }
 
-
-function SteamItem(itemFullName, appid){
+/**
+ * Helperclass holding a Steam Item
+ * @param {String} itemFullName full IEcon name
+ * @param {integer} appid        app id this item is associated to
+ */
+var SteamItem = function(itemFullName, appid){
   this.name = itemFullName;
   this.appid = appid;
-}
+};
 
+/**
+ * Get the worth of this item
+ * @param  {boolean}   refresh  force updating this price trough steam market
+ * @param  {Function} callback function to return the price to
+ */
 SteamItem.prototype.getPrice = function(refresh, callback){
   if(typeof refresh === "function"){
     callback = refresh;
     refresh = false;
   }
 
-  return PriceProvider.getPriceFor(this.name, this.appid, callback);
+  callback(PriceProvider.getPriceFor(this.name, this.appid, callback));
 };
 
 // Lets not use steam market for now mkay
@@ -157,7 +193,17 @@ SteamItem.prototype.getPrice = function(refresh, callback){
 //   }
 // };
 
-function LoungeClass(){
+/**
+ * Class containing most of the stuff related to CSGO/DOTA2 Lounge
+ * @type {Object}
+ */
+var LoungeClass = function(){
+  /**
+   * Class to parse all informations from a bet in the bet history
+   * @param  {jQuery element} betRowJq   information row from the history table
+   * @param  {jQuery element} betItemsJq row with the bet items
+   * @param  {jQuery element} wonItemsJq row with the won items
+   */
   var betHistoryEntry = function(betRowJq, betItemsJq, wonItemsJq){
     //Map bet item Row to all contained Item names
     var filterForItems = function(toFilter){
@@ -188,6 +234,10 @@ function LoungeClass(){
     }
   };
 
+  /**
+   * Load the bet history from Lounge and process the returned html
+   * @param  {Function} callback callback for the loaded data
+   */
   this.getBetHistory = function(callback) {
     var betData, archivedBetData, parsedBetdata = {};
     //Load bet history, and archive asynchronously
@@ -213,15 +263,33 @@ function LoungeClass(){
       }
     }.bind(this));
   }.bind(this);
-}
+};
 
+/**
+ * App id used in the current site
+ * @type {String}
+ */
 LoungeClass.prototype.currentAppid = window.location.hostname == 'dota2lounge.com' ? APP_DOTA : APP_CSGO;
 
+/**
+ * Account Steamid64 of the current logged in user
+ * @type {String}
+ */
 LoungeClass.prototype.currentAccountId = $('#profile .full:last-child input').val().split('=').pop();
 
-function LoungeStatsClass(){
+/**
+ * Main class containing most of the features
+ * @type {Object}
+ */
+var LoungeStatsClass = function(){
   this.Lounge = new LoungeClass();
 
+  /**
+   * Wrapper / helper Class for handling LoungeStats' settings
+   * @param {String} name    name of the setting
+   * @param {Boolean} json    Is the internally handled value an Object (JSON)?
+   * @param {String} fieldid ID of the Field in the settings to auto populate / read from
+   */
   var Setting = function(name, json, fieldid){
     this.name = name;
     this.json = json === true;
@@ -233,11 +301,23 @@ function LoungeStatsClass(){
     if(this.value && this.json) this.value = JSON.parse(this.value);
   };
 
-  Setting.prototype =
-  { getValue: function(){return this.value;},
+  Setting.prototype = {
+    /**
+     * Get the currently set value of this setting
+     * @return setting value
+     */
+    getValue: function(){return this.value;},
+    /**
+     * Helperfunction to poulate a correctly formatted form field with the settings value.
+     * Only works for non-json fields
+     */
     populateFormField: function(){
       if(this.fieldid && !this.json && this.value) $('.loungestatsSetting#'+this.name).val(this.value);
     },
+    /**
+     * Set the value of the setting and save it
+     * @param newValue Object / String to save
+     */
     setValue: function(newValue){
       this.value = newValue;
       if(!this.json) GM_setValue('setting_'+this.name, this.value);
@@ -246,6 +326,10 @@ function LoungeStatsClass(){
     }
   };
 
+  /**
+   * Predefined settings
+   * @type {Object}
+   */
   this.Settings = {
     method: new Setting('method', 'method'),
     currency: new Setting('currency', 'currency'),
@@ -259,6 +343,10 @@ function LoungeStatsClass(){
     accounts: new Setting('accounts', true)
   };
 
+  /**
+   * Helperfunction called when pressing the save button in the settings window
+   * to also save custom stuff like multiaccount settings etc.
+   */
   this.Settings.save = function(){
     $(".loungestatsSetting").each(function(i, setting){
       this.Settings[setting.id].setValue(setting.value);
@@ -273,6 +361,9 @@ function LoungeStatsClass(){
     this.Settings.close();
   }.bind(this);
 
+  /**
+   * Helperfunction called to open the settingswindow and pouplate its fields
+   */
   this.Settings.show = function(){
     for(var key in this.Settings){
       if(!(this.Settings[key] instanceof Setting)) continue;
@@ -295,13 +386,14 @@ function LoungeStatsClass(){
     $('#loungestats_overlay').fadeOut(500);
   };
 
-
-}
+};
 
 LoungeStatsClass.prototype = {
+  /**
+   * Initiate Loungestats, set basic DOM content, initiate handlers, etc.
+   * @param  {Function} callback callback to call
+   */
   init: function(callback){
-    console.log(this);
-
     $('section:nth-child(2) div.box-shiny').append('<a id="loungestats_tabbutton" class="button">LoungeStats</a>');
     GM_addStyle('.jqplot-highlighter-tooltip {background-color: #393938; border: 1px solid gray; padding: 5px; color: #ccc} \
                  .jqplot-xaxis {margin-top: 5px; font-size: 12px} \
@@ -399,37 +491,48 @@ LoungeStatsClass.prototype = {
       ls_settingswindow.toggleClass('accounts', domergesett.val() == 1);
     });
 
-    new datepickr('beforedate', {
-      'dateFormat': 'd.m.Y'
-    });
+    new datepickr('beforedate', {dateFormat:'d.m.Y'});
 
     $('.calendar').detach().appendTo('#loungestats_datecontainer');
 
-    $('#loungestats_tabbutton').click(LoungeStats.loadStats).removeAttr('id');
-    $('#loungestats_overlay, #loungestats_settings_close').click(LoungeStats.Settings.close);
-    $('#loungestats_settings_save').click(LoungeStats.Settings.save);
+    $('#loungestats_tabbutton').click(this.loadStats).removeAttr('id');
+    $('#loungestats_overlay, #loungestats_settings_close').click(this.Settings.close);
+    $('#loungestats_settings_save').click(this.Settings.save);
     ls_settingswindow.find('#loungestats_beforedate, .calendar').click(function(e) {e.stopPropagation();});
     ls_settingswindow.click(function(e) {e.stopPropagation(); $('.calendar').css('display', 'none');});
 
-    if(!LoungeStats.Settings.accounts.getValue()) LoungeStats.Settings.accounts.setValue({available: {'570': {}, '730': {}},
+    //Predefine settings on first load
+    if(!this.Settings.accounts.getValue()) this.Settings.accounts.setValue({available: {'570': {}, '730': {}},
                                                                             active:    {'570': [], '730': []}});
 
-    $(document).on('click', 'a#loungestats_settingsbutton', LoungeStats.Settings.show);
+    $(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
 
     callback();
   },
+  /**
+   * Helperfunction called to cache the bet history for the currently logged in account
+   * to make it availalbe for multi-account usage
+   * @param  {Object} betHistory Object with the bethistory
+   */
   cacheBetHistory: function(betHistory){
-    GM_setValue("Bethistory_" + LoungeStats.Lounge.currentAppid + "_" + LoungeStats.Lounge.currentAccountId, betHistory);
+    GM_setValue("Bethistory_" + this.Lounge.currentAppid + "_" + this.Lounge.currentAccountId, betHistory);
   },
+  /**
+   * Get the previously cached bet history for the defined account
+   * @param  {String} requestedAccount Account to get the bet history for, defaults to the currently logged in one
+   * @return {Object}                  Object with the bethistory
+   */
   getBetHistory: function(requestedAccount){
-    if(!requestedAccount) requestedAccount = LoungeStats.Lounge.currentAccountId;
-    return JSON.parse(GM_getValue("Bethistory_" + LoungeStats.Lounge.currentAppid + "_" + requestedAccount));
+    if(!requestedAccount) requestedAccount = this.Lounge.currentAccountId;
+    return JSON.parse(GM_getValue("Bethistory_" + this.Lounge.currentAppid + "_" + requestedAccount));
   }
 };
 
 var LoungeStats = new LoungeStatsClass();
 
-async.series([PriceProvider.init, ConversionRateProvider.init, LoungeStats.init], function(err){
+async.series([PriceProvider.init.bind(PriceProvider),
+              ConversionRateProvider.init.bind(ConversionRateProvider),
+              LoungeStats.init.bind(LoungeStats)], function(err){
   if(err) return alert(err);
 
   LoungeStats.Lounge.getBetHistory(function(err, bets){
