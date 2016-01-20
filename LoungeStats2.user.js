@@ -49,23 +49,27 @@ var PriceProvider = {
   init: function(callback){
     //Load & cache pricelist
     this.cache = GM_getValue('pricedb');
-    if(this.cache) this.cache = JSON.parse(this.cache);
+    if(this.cache) try{
+      this.cache = JSON.parse(this.cache);
+    }catch(e){
+      console.log(e);
+      this.cache = null;
+    }
 
     if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
       //Aktuelle daten vom RAW Github laden, speichern
-      $.get("https://github.com/kinsi55/LoungeStats2/raw/master/misc/pricedb.json", function(data){
-        try{
-          var parsed = JSON.parse(data);
-          if(parsed["730"] && parsed["570"]){
-            GM_setValue("pricedb", parsed);
-            this.cache = parsed;
-          }
-        }catch(e){}
+      $.get("https://cdn.rawgit.com/kinsi55/LoungeStats2/master/misc/pricedb.json", function(parsed){
+        if(parsed[APP_CSGO]/* && parsed[APP_DOTA]*/){ //TODO remove when cache is gone..
+          GM_setValue("pricedb", JSON.stringify(parsed));
+          this.cache = parsed;
+        }
 
-        if(!this.cache) throw "Couldnt load pricedb from repo..";
+        if(!this.cache || this.cache.success !== "1") throw "Couldnt load pricedb from repo..";
 
         if(callback) callback();
       });
+    }else{
+      if(callback) callback();
     }
   }
 };
@@ -82,23 +86,29 @@ var ConversionRateProvider = {
   init: function(callback){
     //Load & cache conversionrates
     this.cache = GM_getValue('convert_fixer');
-    if(this.cache) this.cache = JSON.parse(this.cache);
+    if(this.cache) try{
+      this.cache = JSON.parse(this.cache);
+    }catch(e){
+      console.log(e);
+      this.cache = null;
+    }
 
     if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
       //Aktuelle daten vom RAW Github laden, speichern
-      $.get("https://api.fixer.io/latest?base=USD", function(data){
-        try{
-          var parsed = JSON.parse(data);
-          if(parsed.base === "USD" && parsed.rates.length){
-            GM_setValue("convert_fixer", parsed);
-            this.cache = parsed;
-          }
-        }catch(e){}
+      $.get("https://api.fixer.io/latest?base=USD", function(parsed){
+        if(parsed.base === "USD" && parsed.rates.EUR){
+          console.log("Ja Alde!");
+          GM_setValue("convert_fixer", JSON.stringify(parsed));
+          this.cache = parsed;
+        }
 
         if(!this.cache) throw "Couldnt load exchange rates from fixer..";
 
         if(callback) callback();
       });
+    }else{
+      this.cache = JSON.parse(GM_getValue("convert_fixer"));
+      if(callback) callback();
     }
   }
 };
@@ -284,10 +294,14 @@ function LoungeStatsClass(){
   this.Settings.close = function(){
     $('#loungestats_overlay').fadeOut(500);
   };
+
+
 }
 
 LoungeStatsClass.prototype = {
-  init: function(){
+  init: function(callback){
+    console.log(this);
+
     $('section:nth-child(2) div.box-shiny').append('<a id="loungestats_tabbutton" class="button">LoungeStats</a>');
     GM_addStyle('.jqplot-highlighter-tooltip {background-color: #393938; border: 1px solid gray; padding: 5px; color: #ccc} \
                  .jqplot-xaxis {margin-top: 5px; font-size: 12px} \
@@ -391,23 +405,25 @@ LoungeStatsClass.prototype = {
 
     $('.calendar').detach().appendTo('#loungestats_datecontainer');
 
-    $('#loungestats_tabbutton').click(this.loadStats).removeAttr('id');
-    $('#loungestats_overlay, #loungestats_settings_close').click(this.Settings.close);
-    $('#loungestats_settings_save').click(this.Settings.save);
+    $('#loungestats_tabbutton').click(LoungeStats.loadStats).removeAttr('id');
+    $('#loungestats_overlay, #loungestats_settings_close').click(LoungeStats.Settings.close);
+    $('#loungestats_settings_save').click(LoungeStats.Settings.save);
     ls_settingswindow.find('#loungestats_beforedate, .calendar').click(function(e) {e.stopPropagation();});
     ls_settingswindow.click(function(e) {e.stopPropagation(); $('.calendar').css('display', 'none');});
 
-    if(!this.Settings.accounts.getValue()) this.Settings.accounts.setValue({available: {'570': {}, '730': {}},
+    if(!LoungeStats.Settings.accounts.getValue()) LoungeStats.Settings.accounts.setValue({available: {'570': {}, '730': {}},
                                                                             active:    {'570': [], '730': []}});
 
-    $(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
+    $(document).on('click', 'a#loungestats_settingsbutton', LoungeStats.Settings.show);
+
+    callback();
   },
   cacheBetHistory: function(betHistory){
-    GM_setValue("Bethistory_" + this.LoungeStats.Lounge.currentAppid + "_" + this.LoungeStats.Lounge.currentAccountId, betHistory);
+    GM_setValue("Bethistory_" + LoungeStats.Lounge.currentAppid + "_" + LoungeStats.Lounge.currentAccountId, betHistory);
   },
   getBetHistory: function(requestedAccount){
-    if(!requestedAccount) requestedAccount = this.LoungeStats.Lounge.currentAccountId;
-    return JSON.parse(GM_getValue("Bethistory_" + this.LoungeStats.Lounge.currentAppid + "_" + requestedAccount));
+    if(!requestedAccount) requestedAccount = LoungeStats.Lounge.currentAccountId;
+    return JSON.parse(GM_getValue("Bethistory_" + LoungeStats.Lounge.currentAppid + "_" + requestedAccount));
   }
 };
 
@@ -421,7 +437,7 @@ async.series([PriceProvider.init, ConversionRateProvider.init, LoungeStats.init]
 
     if(LoungeStats.Settings.domerge.getValue() == "1"){
 
-      var useaccs = LoungeStats.accounts.getValue().active[app_id];
+      var useaccs = LoungeStats.accounts.getValue().active[LoungeStats.Lounge.currentAppid];
 
       useaccs.forEach(function(acc){
         var bhistory = LoungeStats.getBetHistory(acc);
@@ -441,7 +457,7 @@ async.series([PriceProvider.init, ConversionRateProvider.init, LoungeStats.init]
 
     //TODO Plot graph...
   });
-})
+});
 
 
 
