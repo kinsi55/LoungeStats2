@@ -7,11 +7,12 @@
 // @include     https://csgolounge.com/myprofile
 // @include     https://dota2lounge.com/myprofile
 // @version     2.0.0
-// @require     http://loungestats.kinsi.me/dl/jquery-2.1.1.min.js
-// @require     http://loungestats.kinsi.me/dl/jquery.jqplot.min.js
-// @require     http://loungestats.kinsi.me/dl/jqplot.cursor.min.js
-// @require     http://loungestats.kinsi.me/dl/jqplot.dateAxisRenderer.min.js
-// @require     http://loungestats.kinsi.me/dl/jqplot.highlighter.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/jquery/2.2.0/jquery.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/jqPlot/1.0.8/jquery.jqplot.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/jqPlot/1.0.8/plugins/jqplot.cursor.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/jqPlot/1.0.8/plugins/jqplot.dateAxisRenderer.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/jqPlot/1.0.8/plugins/jqplot.highlighter.min.js
+// @require     https://cdnjs.cloudflare.com/ajax/libs/async/1.5.2/async.min.js
 // @require     http://loungestats.kinsi.me/dl/datepickr_mod.min.js
 // @downloadURL http://loungestats.kinsi.me/dl/LoungeStats.user.js
 // @updateURL   http://loungestats.kinsi.me/dl/LoungeStats.user.js
@@ -26,12 +27,83 @@
 // You are not allowed to sell the whole, or parts of this script
 // Copyright belongs to "Kinsi" (user Kinsi55 on reddit, /id/kinsi on steam)
 
-var version = GM_info.script.version;
-var newVersion = (GM_getValue('LoungeStats_lastversion') != version);
+//http://stackoverflow.com/questions/13589880/using-json-stringify-on-custom-class
+//
+'use strict';
 
-var $ = this.$; //STFU JSLINT
+var version = GM_info.script.version;
+var newVersion = (GM_getValue('lastversion') != version);
+
 var APP_CSGO = '730';
 var APP_DOTA = '570';
+
+var PriceProvider = {
+  getPriceFor: function(appId, itemName, callback){
+    if(!this.cache) throw "No prices cached...";
+    if(!this.cache[appId][itemName]) throw "Requested item not found"; //Possibly report back and / or fallback to loading from market?
+
+    var p = parseFloat(this.cache[appId][itemName]);
+    callback(p);
+    return p;
+  },
+  init: function(callback){
+    //Load & cache pricelist
+    this.cache = GM_getValue('pricedb');
+    if(this.cache) this.cache = JSON.parse(this.cache);
+
+    if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
+      //Aktuelle daten vom RAW Github laden, speichern
+      $.get("https://github.com/kinsi55/LoungeStats2/raw/master/misc/pricedb.json", function(data){
+        try{
+          var parsed = JSON.parse(data);
+          if(parsed["730"] && parsed["570"]){
+            GM_setValue("pricedb", parsed);
+            this.cache = parsed;
+          }
+        }catch(e){}
+
+        if(!this.cache) throw "Couldnt load pricedb from repo..";
+
+        if(callback) callback();
+      });
+    }
+  }
+};
+
+var ConversionRateProvider = {
+  convert: function(amount, to_currency, from_currency){
+    if(!this.cache) throw "No prices cached...";
+    if(!from_currency) from_currency = "USD";
+    if(!this.cache.rates[to_currency]) throw "Unknown destination currency";
+    if(!this.cache.rates[from_currency]) throw "Unknown source currency";
+
+    return amount / this.cache.rates[from_currency] * this.cache.rates[to_currency];
+  },
+  init: function(callback){
+    //Load & cache conversionrates
+    this.cache = GM_getValue('convert_fixer');
+    if(this.cache) this.cache = JSON.parse(this.cache);
+
+    if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
+      //Aktuelle daten vom RAW Github laden, speichern
+      $.get("https://api.fixer.io/latest?base=USD", function(data){
+        try{
+          var parsed = JSON.parse(data);
+          if(parsed.base === "USD" && parsed.rates.length){
+            GM_setValue("convert_fixer", parsed);
+            this.cache = parsed;
+          }
+        }catch(e){}
+
+        if(!this.cache) throw "Couldnt load exchange rates from fixer..";
+
+        if(callback) callback();
+      });
+    }
+  }
+};
+
+
 
 //http://stackoverflow.com/a/5812341/3526458
 function isValidDate(s) {
@@ -40,46 +112,51 @@ function isValidDate(s) {
   return d && (d.getMonth() + 1) == bits[1] && d.getDate() == Number(bits[0]);
 }
 
-function SteamItem(itemFullName){
+
+function SteamItem(itemFullName, appid){
   this.name = itemFullName;
+  this.appid = appid;
 }
 
-SteamItem.prototype.getPrice = function(){
-  //TBD
-  return 0.0;
-};
-
-SteamItem.prototype.loadPrice = function(refresh, callback){
+SteamItem.prototype.getPrice = function(refresh, callback){
   if(typeof refresh === "function"){
     callback = refresh;
     refresh = false;
   }
-  //if(!refresh && !GM_getValue(this.name))
+
+  return PriceProvider.getPriceFor(this.name, this.appid, callback);
 };
 
-var Steam = {
-  Market: {
-    loadPrice: function(appId, itemName, atDate, callback){
-      if(typeof atDate === "function"){
-        callback = atDate;
-        atDate = false;
-      }
+// Lets not use steam market for now mkay
+// var Steam = {
+//   Market: {
+//     loadPrice: function(appId, itemName, atDate, callback){
+//       if(typeof atDate === "function"){
+//         callback = atDate;
+//         atDate = false;
+//       }
 
-      if(!atDate){
-        $.get("https://steamcommunity.com/market/listings/"+appId+"/"+encodeURI(itemName), function(data){
-          betData = data;
-        }.bind(this));
-      }
+//       if(!atDate){
+//         $.get("https://steamcommunity.com/market/listings/"+appId+"/"+encodeURI(itemName), function(data){
+//           betData = data;
+//         }.bind(this));
+//       }
 
 
-    }
-  }
-};
+//     }
+//   }
+// };
 
 function LoungeClass(){
   var betHistoryEntry = function(betRowJq, betItemsJq, wonItemsJq){
     //Map bet item Row to all contained Item names
-    var filterForItems = function(toFilter){return toFilter.find('div > div.name > b:first-child').map(function(){return new SteamItem(this.textContent.trim());});};
+    var filterForItems = function(toFilter){
+      return toFilter
+      .find('div > div.name > b:first-child')
+      .map(function(){
+        return new SteamItem(this.textContent.trim(), this.currentAppid);
+      });
+    };
 
     betItemsJq      = filterForItems(betItemsJq);
     wonItemsJq      = filterForItems(wonItemsJq);
@@ -91,41 +168,46 @@ function LoungeClass(){
     this.teams      = [betRowJq.children()[2].children[0].textContent, betRowJq.children()[4].children[0].textContent];
     this.winner     = (betRowJq.children()[4].style.fontWeight == 'bold')+0;
 
-    this.betoutcome = betRowJq.children()[1].children[0].classList[0] || "draw";
+    this.betoutcome = betRowJq.children()[1].children[0].classList[0] || 'draw';
 
     if(wonItemsJq.length > 0){
-      this.betoutcome = "won"; // http://redd.it/3edctm
-    }else if(['won', 'draw'].indexOf(this.betoutcome) == -1){
+      this.betoutcome = 'won'; // http://redd.it/3edctm
+    }else if(['won', 'draw'].indexOf(this.betoutcome) === -1){
       //Match neither won or drawn? Its gotta be a loss..
       this.items.lost = betItemsJq;
     }
   };
 
   this.getBetHistory = function(callback) {
-    var betData, archivedBetData, parsedBetdata = [];
+    var betData, archivedBetData, parsedBetdata = {};
     //Load bet history, and archive asynchronously
     $.when(
-      $.get("/ajax/betHistory.php",         function(data){betData = data;}),
-      $.get("/ajax/betHistoryArchives.php", function(data){archivedBetData = data;})
+      $.get('/ajax/betHistory.php',         function(data){betData = data;}),
+      $.get('/ajax/betHistoryArchives.php', function(data){archivedBetData = data;})
     ).then(function(){
-      if(!betData || !archivedBetData || betData.indexOf("<tr>") == -1 || archivedBetData.indexOf("<tr>") == -1 ){
-        if(callback) callback("Failed to load either betHistory or archivedBetHistory", null);
+      if(!betData || !archivedBetData || betData.indexOf('<tr>') == -1 || archivedBetData.indexOf('<tr>') == -1 ){
+        callback('Failed to load either betHistory or archivedBetHistory', null);
       }else{
         //"Concat" both html Tables, parse it w/ jQuery, get every tablerow
         var preParsedBetdata = $(betData.split('</tbody>')[0]+archivedBetData.split('<tbody>')[1]).find('tr');
 
         //Iterate bets from the end so oldest bets are first, step = 2 since theres always a row with bet info, then the won items, then the lost items, so 3 rows per bet
         for(var i = preParsedBetdata.length-3; i > 0; i -= 3){
-          parsedBetdata.push(new betHistoryEntry($(preParsedBetdata[i]), $(preParsedBetdata[i+1]), $(preParsedBetdata[i+2])));
+          var bhistoryentry = new betHistoryEntry($(preParsedBetdata[i]), $(preParsedBetdata[i + 1]), $(preParsedBetdata[i + 2]));
+          parsedBetdata[bhistoryentry.matchId] = bhistoryentry;
         }
 
-        if(callback) callback(null, parsedBetdata);
+        callback(null, parsedBetdata);
+
+        this.betHistory = parsedBetdata;
       }
-    });
-  };
+    }.bind(this));
+  }.bind(this);
 }
 
 LoungeClass.prototype.currentAppid = window.location.hostname == 'dota2lounge.com' ? APP_DOTA : APP_CSGO;
+
+LoungeClass.prototype.currentAccountId = $('#profile .full:last-child input').val().split('=').pop();
 
 function LoungeStatsClass(){
   this.Lounge = new LoungeClass();
@@ -134,23 +216,25 @@ function LoungeStatsClass(){
     this.name = name;
     this.json = json === true;
     this.fieldid = fieldid || json;
-    if(this.fieldid === true) this.fieldid = undefined;
+    if(this.fieldid === json) this.fieldid = undefined;
 
     this.value = GM_getValue('setting_'+this.name);
 
     if(this.value && this.json) this.value = JSON.parse(this.value);
   };
 
-  Setting.prototype= {getValue: function(){return this.value;},
-                      populateFormField: function(){
-                        if(this.fieldid && !this.json && this.value) $('.loungestatsSetting#'+this.name).val(this.value);
-                      },
-                      setValue: function(newValue){
-                        this.value = newValue;
-                        if(!this.json) GM_setValue('setting_'+this.name, this.value);
-                        if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this.value));
-                        return newValue;
-                      }};
+  Setting.prototype =
+  { getValue: function(){return this.value;},
+    populateFormField: function(){
+      if(this.fieldid && !this.json && this.value) $('.loungestatsSetting#'+this.name).val(this.value);
+    },
+    setValue: function(newValue){
+      this.value = newValue;
+      if(!this.json) GM_setValue('setting_'+this.name, this.value);
+      if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this.value));
+      return newValue;
+    }
+  };
 
   this.Settings = {
     method: new Setting('method', 'method'),
@@ -162,8 +246,7 @@ function LoungeStatsClass(){
     domerge: new Setting('domerge', 'domerge'),
     hideclosed: new Setting('hideclosed', 'hideclosed'),
     lastversion: new Setting('lastversion'),
-    accounts: new Setting('accounts', true),
-    cachedBets: new Setting('cachedbets', true)
+    accounts: new Setting('accounts', true)
   };
 
   this.Settings.save = function(){
@@ -188,10 +271,10 @@ function LoungeStatsClass(){
 
     var multiaccthing = '<div>' + (this.Lounge.currentAppid == APP_CSGO ? 'CS:GO' : 'DotA') + ' Accounts</div>';
 
-    for(var i in this.Settings.accounts.getValue().aval[this.Lounge.currentAppid]) {
-      var bla = this.Settings.accounts.getValue().active[this.Lounge.currentAppid].indexOf(i) != -1 ? "checked" : "";
+    for(var i in this.Settings.accounts.getValue().available[this.Lounge.currentAppid]) {
+      var sett_is_checked = this.Settings.accounts.getValue().active[this.Lounge.currentAppid].indexOf(i) != -1 ? 'checked' : '';
 
-      multiaccthing += '<input type="checkbox" name="'+i+'" '+bla+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.getValue().aval[this.Lounge.currentAppid][i]+'</a>"<br/>';
+      multiaccthing += '<input type="checkbox" name="'+i+'" '+sett_is_checked+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.getValue().available[this.Lounge.currentAppid][i]+'</a>"<br/>';
     }
     $('#loungestats_mergepicks').html(multiaccthing);
 
@@ -243,7 +326,7 @@ LoungeStatsClass.prototype = {
             Pricing accuracy <a class="info">?<p class="infobox"><br>Fastest: Use current item prices for all bets<br><br>Most accurate: Use item prices at approximately the time of the bet, as little delay as possible between requests<br><br>Most accurate & safest: Same as Most accurate, but with a bit more delay between requests</p></a>:<br> \
             <select class="loungestatsSetting" id="method"> \
               <option value="0">Fastest (Current prices for everything)</option> \
-              <option value="1">Most accurate (Prices from at bet-date)</option> \
+              <option value="1" disabled>Most accurate (Prices from at bet-date, Currently disabled)</option> \
             </select><br> \
             Currency:<br> \
             <select class="loungestatsSetting" id="currency"> \
@@ -295,8 +378,11 @@ LoungeStatsClass.prototype = {
       </div> \
     </div>');
 
-    $('.loungestatsSetting#domerge').change(function() {
-      $('#loungestats_settingswindow').toggleClass('accounts', $('.loungestatsSetting#domerge').val() == 1);
+    var domergesett = $('.loungestatsSetting#domerge'),
+        ls_settingswindow = $('#loungestats_settingswindow');
+
+    domergesett.change(function() {
+      ls_settingswindow.toggleClass('accounts', domergesett.val() == 1);
     });
 
     new datepickr('beforedate', {
@@ -305,31 +391,58 @@ LoungeStatsClass.prototype = {
 
     $('.calendar').detach().appendTo('#loungestats_datecontainer');
 
-    $('#loungestats_tabbutton').click(function() {this.loadStats();}.bind(this)).removeAttr('id');
-    $('#loungestats_overlay, #loungestats_settings_close').click(function() {this.Settings.close();}.bind(this));
-    $('#loungestats_settings_save').click(function() {this.Settings.save();}.bind(this));
-    $('#loungestats_settingswindow #loungestats_beforedate, .calendar').click(function(e) {e.stopPropagation();});
-    $('#loungestats_settingswindow').click(function(e) {e.stopPropagation(); $('.calendar').css('display','none');});
+    $('#loungestats_tabbutton').click(this.loadStats).removeAttr('id');
+    $('#loungestats_overlay, #loungestats_settings_close').click(this.Settings.close);
+    $('#loungestats_settings_save').click(this.Settings.save);
+    ls_settingswindow.find('#loungestats_beforedate, .calendar').click(function(e) {e.stopPropagation();});
+    ls_settingswindow.click(function(e) {e.stopPropagation(); $('.calendar').css('display', 'none');});
 
-    if(!this.Settings.accounts.getValue()){
-      this.Settings.accounts.setValue({aval: {'570': {}, '730': {}}, active: {'570': [], '730': []}});
-      this.Settings.cachedBets.setValue({});
-    }
+    if(!this.Settings.accounts.getValue()) this.Settings.accounts.setValue({available: {'570': {}, '730': {}},
+                                                                            active:    {'570': [], '730': []}});
 
-    $(document).on('click', 'a#loungestats_settingsbutton', function(){
-      this.Settings.show();
-    }.bind(this));
+    $(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
+  },
+  cacheBetHistory: function(betHistory){
+    GM_setValue("Bethistory_" + this.LoungeStats.Lounge.currentAppid + "_" + this.LoungeStats.Lounge.currentAccountId, betHistory);
+  },
+  getBetHistory: function(requestedAccount){
+    if(!requestedAccount) requestedAccount = this.LoungeStats.Lounge.currentAccountId;
+    return JSON.parse(GM_getValue("Bethistory_" + this.LoungeStats.Lounge.currentAppid + "_" + requestedAccount));
   }
 };
 
 var LoungeStats = new LoungeStatsClass();
 
-LoungeStats.init();
+async.series([PriceProvider.init, ConversionRateProvider.init, LoungeStats.init], function(err){
+  if(err) return alert(err);
 
-LoungeStats.Lounge.getBetHistory(function(err, bets){
-  if(err) return;
+  LoungeStats.Lounge.getBetHistory(function(err, bets){
+    if(err) return;
 
-  LoungeStats.Settings.
-});
+    if(LoungeStats.Settings.domerge.getValue() == "1"){
 
-LoungeStats.Settings.show();
+      var useaccs = LoungeStats.accounts.getValue().active[app_id];
+
+      useaccs.forEach(function(acc){
+        var bhistory = LoungeStats.getBetHistory(acc);
+
+        //TODO give all the bet items the proto of SteamItem, and merge them together with the current account's bets
+        //Possibly, if an alt acc has a bet the current one doesnt we need to insert a new bet from that account
+      });
+
+      //TODO Re-sort since we might've added new bets from an alt acc
+    }
+
+    //TODO load prices for all the items (.concat, async.each ?)
+
+    //TODO calculate streaks, stats, ...
+
+    //TODO Generate DOM content
+
+    //TODO Plot graph...
+  });
+})
+
+
+
+//LoungeStats.Settings.show();
