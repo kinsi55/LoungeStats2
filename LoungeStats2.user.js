@@ -27,7 +27,6 @@
 // You are not allowed to sell the whole, or parts of this script
 // Copyright belongs to "Kinsi" (user Kinsi55 on reddit, /id/kinsi on steam)
 
-//http://stackoverflow.com/questions/13589880/using-json-stringify-on-custom-class
 //
 'use strict';
 
@@ -49,12 +48,12 @@ var PriceProvider = {
    * @param  {Function} callback callback function to pipe the price to
    * @return {Float}            items price
    */
-  getPriceFor: function(appId, itemName, callback){
+  getPriceFor: function(itemName, appId, callback){
     if(!this.cache) throw "No prices cached...";
     if(!this.cache[appId][itemName]) throw "Requested item not found"; //Possibly report back and / or fallback to loading from market?
 
-    var p = parseFloat(this.cache[appId][itemName]);
-    callback(p);
+    var p = parseFloat(this.cache[appId][itemName]) / 100;
+    if(callback) callback(null, p);
     return p;
   },
   /**
@@ -106,6 +105,15 @@ var ConversionRateProvider = {
     return amount / this.cache.rates[from_currency] * this.cache.rates[to_currency];
   },
   /**
+   * get available currencies
+   * @return {Array}               Available currencies
+   */
+  getAvailableCurrencies: function(){
+    if(!this.cache) throw "No prices cached...";
+
+    return Object.keys(this.cache.rates);
+  },
+  /**
    * Load the locally cached, or externally refreshed rate DB in and load it into RAM
    * @param  {Function} callback callback when done
    */
@@ -119,7 +127,6 @@ var ConversionRateProvider = {
       //Aktuelle daten vom RAW Github laden, speichern
       $.get("https://api.fixer.io/latest?base=USD", function(parsed){
         if(parsed.base === "USD" && parsed.rates.EUR){
-          console.log("Ja Alde!");
           GM_setValue("convert_fixer", JSON.stringify(parsed));
           this.cache = parsed;
         }
@@ -169,8 +176,9 @@ SteamItem.prototype.getPrice = function(refresh, callback){
     callback = refresh;
     refresh = false;
   }
-
-  callback(PriceProvider.getPriceFor(this.name, this.appid, callback));
+  var p = PriceProvider.getPriceFor(this.name, this.appid, callback);
+  if(callback) callback(null, p);
+  return p;
 };
 
 // Lets not use steam market for now mkay
@@ -204,13 +212,13 @@ var LoungeClass = function(){
    * @param  {jQuery element} betItemsJq row with the bet items
    * @param  {jQuery element} wonItemsJq row with the won items
    */
-  var betHistoryEntry = function(betRowJq, betItemsJq, wonItemsJq){
+  this.betHistoryEntry = function(betRowJq, betItemsJq, wonItemsJq, appId){
     //Map bet item Row to all contained Item names
     var filterForItems = function(toFilter){
       return toFilter
-      .find('div > div.name > b:first-child')
-      .map(function(){
-        return new SteamItem(this.textContent.trim(), this.currentAppid);
+      .find('div > div.name > b:first-child').get()
+      .map(function(e){
+        return new SteamItem(e.textContent.trim(), appId);
       });
     };
 
@@ -245,15 +253,15 @@ var LoungeClass = function(){
       $.get('/ajax/betHistory.php',         function(data){betData = data;}),
       $.get('/ajax/betHistoryArchives.php', function(data){archivedBetData = data;})
     ).then(function(){
-      if(!betData || !archivedBetData || betData.indexOf('<tr>') == -1 || archivedBetData.indexOf('<tr>') == -1 ){
-        callback('Failed to load either betHistory or archivedBetHistory', null);
+      if(!betData || !archivedBetData || betData.indexOf('<tbody>') == -1 || archivedBetData.indexOf('<tbody>') == -1){
+        callback('Failed to load either betHistory or archivedBetHistory (Itemdraft possibly in progress?)', null);
       }else{
         //"Concat" both html Tables, parse it w/ jQuery, get every tablerow
         var preParsedBetdata = $(betData.split('</tbody>')[0]+archivedBetData.split('<tbody>')[1]).find('tr');
 
         //Iterate bets from the end so oldest bets are first, step = 2 since theres always a row with bet info, then the won items, then the lost items, so 3 rows per bet
         for(var i = preParsedBetdata.length-3; i > 0; i -= 3){
-          var bhistoryentry = new betHistoryEntry($(preParsedBetdata[i]), $(preParsedBetdata[i + 1]), $(preParsedBetdata[i + 2]));
+          var bhistoryentry = new this.betHistoryEntry($(preParsedBetdata[i]), $(preParsedBetdata[i + 1]), $(preParsedBetdata[i + 2]), this.currentAppid);
           parsedBetdata[bhistoryentry.matchId] = bhistoryentry;
         }
 
@@ -262,7 +270,7 @@ var LoungeClass = function(){
         this.betHistory = parsedBetdata;
       }
     }.bind(this));
-  }.bind(this);
+  };
 };
 
 /**
@@ -291,14 +299,14 @@ var LoungeStatsClass = function(){
    * @param {String} fieldid ID of the Field in the settings to auto populate / read from
    */
   var Setting = function(name, json, fieldid){
-    this.name = name;
     this.json = json === true;
+    this.name = name;
     this.fieldid = fieldid || json;
     if(this.fieldid === json) this.fieldid = undefined;
 
-    this.value = GM_getValue('setting_'+this.name);
+    this._val = GM_getValue('setting_'+this.name);
 
-    if(this.value && this.json) this.value = JSON.parse(this.value);
+    if(this._val && this.json) this._val = JSON.parse(this._val);
   };
 
   Setting.prototype = {
@@ -306,24 +314,21 @@ var LoungeStatsClass = function(){
      * Get the currently set value of this setting
      * @return setting value
      */
-    getValue: function(){return this.value;},
-    /**
-     * Helperfunction to poulate a correctly formatted form field with the settings value.
-     * Only works for non-json fields
-     */
-    populateFormField: function(){
-      if(this.fieldid && !this.json && this.value) $('.loungestatsSetting#'+this.name).val(this.value);
+    get value(){
+      return this._val;
     },
     /**
      * Set the value of the setting and save it
      * @param newValue Object / String to save
      */
-    setValue: function(newValue){
-      this.value = newValue;
-      if(!this.json) GM_setValue('setting_'+this.name, this.value);
-      if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this.value));
-      return newValue;
-    }
+    set value(newValue){
+      this._val = newValue;
+      if(!this.json) GM_setValue('setting_'+this.name, this._val);
+      if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this._val));
+    },
+    populateFormField: function(){
+      if(this.fieldid && !this.json && this._val) $('.loungestatsSetting#'+this.name).val(this._val);
+    },
   };
 
   /**
@@ -349,11 +354,11 @@ var LoungeStatsClass = function(){
    */
   this.Settings.save = function(){
     $(".loungestatsSetting").each(function(i, setting){
-      this.Settings[setting.id].setValue(setting.value);
+      this.Settings[setting.id].value = setting.value;
     }.bind(this));
 
     if(isValidDate($('#beforedate').val())){
-      this.Settings.beforedate.setValue($('#beforedate').val());
+      this.Settings.beforedate.value = $('#beforedate').val();
     } else {
       alert('The format of the given date is invalid! Use Day.Month.Year!');
       return;
@@ -372,10 +377,10 @@ var LoungeStatsClass = function(){
 
     var multiaccthing = '<div>' + (this.Lounge.currentAppid == APP_CSGO ? 'CS:GO' : 'DotA') + ' Accounts</div>';
 
-    for(var i in this.Settings.accounts.getValue().available[this.Lounge.currentAppid]) {
-      var sett_is_checked = this.Settings.accounts.getValue().active[this.Lounge.currentAppid].indexOf(i) != -1 ? 'checked' : '';
+    for(var i in this.Settings.accounts.value.available[this.Lounge.currentAppid]) {
+      var sett_is_checked = this.Settings.accounts.value.active[this.Lounge.currentAppid].indexOf(i) != -1 ? 'checked' : '';
 
-      multiaccthing += '<input type="checkbox" name="'+i+'" '+sett_is_checked+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.getValue().available[this.Lounge.currentAppid][i]+'</a>"<br/>';
+      multiaccthing += '<input type="checkbox" name="'+i+'" '+sett_is_checked+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.Settings.accounts.value.available[this.Lounge.currentAppid][i]+'</a>"<br/>';
     }
     $('#loungestats_mergepicks').html(multiaccthing);
 
@@ -401,7 +406,7 @@ LoungeStatsClass.prototype = {
                  .jqplot-yaxis-tick {text-align: right; width: 100vw} \
                  #loungestats_overlay {z-index: 9000; display: none; top: 0px; left: 0px; width: 100vw; height: 100vh; background-color: rgba(0, 0, 0, 0.4); position: fixed} \
                  #loungestats_settings_title {text-align: center; font-size: 12px; height: 40px; border: 2px solid #DDD; border-top: none; background-color: #EEE; width: 100%; margin-top: -10px; -webkit-border-radius: 0 0 5px 5px; border-radius: 0 0 5px 5px; padding: 10px 5px 0 5px; -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box;} \
-                 #loungestats_settingswindow {font-size: 13px; z-index: 9001; padding: 10px; -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box; position: relative; background-color: white; left: 50%; top: 50%; width: 300px; margin-left: -151px; height: 420px; margin-top: -211px; -webkit-border-radius: 5px; border-radius: 5px; -webkit-box-shadow: 0 0 10px -5px #000; box-shadow: 0 0 10px -5px #000; border: 1px solid gray; overflow: hidden;-webkit-transition: all 250ms ease-in-out;-moz-transition: all 250ms ease-in-out;-ms-transition: all 250ms ease-in-out;-o-transition: all 250ms ease-in-out;transition: all 250ms ease-in-out;} \
+                 #loungestats_settingswindow {font-size: 13px; z-index: 9001; padding: 10px; -moz-box-sizing: border-box; -webkit-box-sizing: border-box; box-sizing: border-box; position: relative; background-color: white; left: 50%; top: 50%; width: 300px; margin-left: -151px; height: 430px; margin-top: -216px; -webkit-border-radius: 5px; border-radius: 5px; -webkit-box-shadow: 0 0 10px -5px #000; box-shadow: 0 0 10px -5px #000; border: 1px solid gray; overflow: hidden;-webkit-transition: all 250ms ease-in-out;-moz-transition: all 250ms ease-in-out;-ms-transition: all 250ms ease-in-out;-o-transition: all 250ms ease-in-out;transition: all 250ms ease-in-out;} \
                  #loungestats_settingswindow.accounts {width: 500px; margin-left: -251px;} \
                  #loungestats_settings_leftpanel select, #loungestats_settings_leftpanel input{margin: 3px 0; width: 100%; height: 22px !important; padding: 0;} \
                  #loungestats_settings_leftpanel input{width: 274px;} \
@@ -417,7 +422,7 @@ LoungeStatsClass.prototype = {
                  #loungestats_updateinfo{text-align: center;} \
                  #loungestats_mergepicks{border:2px solid #ccc; height: 100px; overflow-y: scroll; height: 258px; padding: 5px;-moz-box-sizing: border-box;-webkit-box-sizing: border-box;box-sizing: border-box;} \
                  #loungestats_mergepicks div:first-child{font-weight: bold;} \
-                 #loungestats_mergepicks input{height: 20px !important;vertical-align: middle;} \
+                 #loungestats_mergepicks input{height: 20px !important; vertical-align: middle;} \
                  #loungestats_datecontainer{position: relative;} \
                  #loungestats_stats_text a{color: blue;} \
                  .hideuntilready{display: none !important;}');
@@ -425,7 +430,7 @@ LoungeStatsClass.prototype = {
     GM_addStyle('.calendar {top: 5px !important; left: 108px !important; font-family: \'Trebuchet MS\', Tahoma, Verdana, Arial, sans-serif !important;font-size: 0.9em !important;background-color: #EEE !important;color: #333 !important;border: 1px solid #DDD !important;-moz-border-radius: 4px !important;-webkit-border-radius: 4px !important;border-radius: 4px !important;padding: 0.2em !important;width: 14em !important;}.calendar .months {background-color: #F6AF3A !important;border: 1px solid #E78F08 !important;-moz-border-radius: 4px !important;-webkit-border-radius: 4px !important;border-radius: 4px !important;color: #FFF !important;padding: 0.2em !important;text-align: center !important;}.calendar .prev-month,.calendar .next-month {padding: 0 !important;}.calendar .prev-month {float: left !important;}.calendar .next-month {float: right !important;}.calendar .current-month {margin: 0 auto !important;}.calendar .months .prev-month,.calendar .months .next-month {color: #FFF !important;text-decoration: none !important;padding: 0 0.4em !important;-moz-border-radius: 4px !important;-webkit-border-radius: 4px !important;border-radius: 4px !important;cursor: pointer !important;}.calendar .months .prev-month:hover,.calendar .months .next-month:hover {background-color: #FDF5CE !important;color: #C77405 !important;}.calendar table {border-collapse: collapse !important;padding: 0 !important;font-size: 0.8em !important;width: 100% !important;}.calendar th {text-align: center !important; color: black !important;}.calendar td {text-align: right !important;padding: 1px !important;width: 14.3% !important;}.calendar tr{border: none !important; background: none !important;}.calendar td span {display: block !important;color: #1C94C4 !important;background-color: #F6F6F6 !important;border: 1px solid #CCC !important;text-decoration: none !important;padding: 0.2em !important;cursor: pointer !important;}.calendar td span:hover {color: #C77405 !important;background-color: #FDF5CE !important;border: 1px solid #FBCB09 !important;}.calendar td.today span {background-color: #FFF0A5 !important;border: 1px solid #FED22F !important;color: #363636 !important;}');
 
     $('body').append('<div id="loungestats_overlay"> \
-      <div id="loungestats_settingswindow"'+((this.Settings.domerge == '1') ? ' class="accounts"' : '')+'> \
+      <div id="loungestats_settingswindow"'+((this.Settings.domerge.value == '1') ? ' class="accounts"' : '')+'> \
         <div id="loungestats_settings_title">Loungestats '+version+' Settings | by <a href="http://reddit.com/u/kinsi55">/u/kinsi55</a><br><br></div> \
         <div id="loungestats_settings_panelcontainer"> \
           <div id="loungestats_settings_leftpanel"> \
@@ -435,13 +440,7 @@ LoungeStatsClass.prototype = {
               <option value="1" disabled>Most accurate (Prices from at bet-date, Currently disabled)</option> \
             </select><br> \
             Currency:<br> \
-            <select class="loungestatsSetting" id="currency"> \
-              <option value="1">US Dollar(Most exact)</option> \
-              <option value="3">Euro</option> \
-              <option value="2">Great British Pound</option> \
-              <option value="5">Rubel</option> \
-              <option value="7">Brazilian real</option> \
-            </select><br> \
+            <select class="loungestatsSetting" id="currency"></select><br> \
             Show bet value graph:<br> \
             <select class="loungestatsSetting" id="bvalue"> \
               <option value="1">Yes</option> \
@@ -484,6 +483,11 @@ LoungeStatsClass.prototype = {
       </div> \
     </div>');
 
+    //Populate currencies field
+    $('select#currency').html(ConversionRateProvider.getAvailableCurrencies().reduce(function(pv, cv){
+      return pv + '<option value="'+ cv +'">'+ cv +'</option>';
+    }, ""));
+
     var domergesett = $('.loungestatsSetting#domerge'),
         ls_settingswindow = $('#loungestats_settingswindow');
 
@@ -495,15 +499,17 @@ LoungeStatsClass.prototype = {
 
     $('.calendar').detach().appendTo('#loungestats_datecontainer');
 
-    $('#loungestats_tabbutton').click(this.loadStats).removeAttr('id');
+    $('#loungestats_tabbutton').click(this.loadStats);
     $('#loungestats_overlay, #loungestats_settings_close').click(this.Settings.close);
     $('#loungestats_settings_save').click(this.Settings.save);
     ls_settingswindow.find('#loungestats_beforedate, .calendar').click(function(e) {e.stopPropagation();});
     ls_settingswindow.click(function(e) {e.stopPropagation(); $('.calendar').css('display', 'none');});
 
+    console.log(this.Settings.accounts);
+
     //Predefine settings on first load
-    if(!this.Settings.accounts.getValue()) this.Settings.accounts.setValue({available: {'570': {}, '730': {}},
-                                                                            active:    {'570': [], '730': []}});
+    if(!this.Settings.accounts.value) this.Settings.accounts.value = {available: {'570': {}, '730': {}},
+                                                                      active:    {'570': [], '730': []}};
 
     $(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
 
@@ -522,46 +528,388 @@ LoungeStatsClass.prototype = {
    * @param  {String} requestedAccount Account to get the bet history for, defaults to the currently logged in one
    * @return {Object}                  Object with the bethistory
    */
-  getBetHistory: function(requestedAccount){
+  getCachedBetHistory: function(requestedAccount){
     if(!requestedAccount) requestedAccount = this.Lounge.currentAccountId;
-    return JSON.parse(GM_getValue("Bethistory_" + this.Lounge.currentAppid + "_" + requestedAccount));
+    var h = JSON.parse(GM_getValue("Bethistory_" + this.Lounge.currentAppid + "_" + requestedAccount) || "[]");
+
+    Object.keys(h).forEach(function(key){
+      console.log(typeof h[key]);
+
+
+      h[key].constructor.call(this.Lounge.betHistoryEntry);
+
+      console.log(typeof h[key]);
+
+
+      h[key].__proto__ = this.Lounge.betHistoryEntry.prototype;
+
+      console.log(typeof h[key]);
+
+      h[key].betDate = new Date(Date.parse(h[key].betDate));
+
+      h[key].items.won = h[key].items.won.map(function(i){i.__proto__ = SteamItem.prototype;});
+      h[key].items.bet = h[key].items.bet.map(function(i){i.__proto__ = SteamItem.prototype;});
+      h[key].items.lost = h[key].items.lost.map(function(i){i.__proto__ = SteamItem.prototype;});
+    });
+
+    return h;
   }
 };
 
 var LoungeStats = new LoungeStatsClass();
 
+LoungeStats.loadStats = function(){
+  if(!LoungeStats.Settings.method){
+    $('#ajaxCont').html('Please set up Loungestats first');
+    return LoungeStats.Settings.show();
+  }
+
+  $(window).off('resize');
+
+  $('#ajaxCont').html('<a id="loungestats_settingsbutton" class="button">LoungeStats Settings</a> \
+    <a class="button" target="_blank" href="http://steamcommunity.com/tradeoffer/new/?partner=33309635&token=H0lCbkY3">Donate ♥</a> \
+                        <a class="button" target="_blank" href="http://reddit.com/r/LoungeStats">Subreddit</a> \
+                        <a id="loungestats_resetzoombutton" class="button hideuntilready">Reset Zoom</a> \
+                        <a id="loungestats_screenshotbutton" class="button hideuntilready">Screenshot</a> \
+                        <a id="loungestats_csvexport" class="button hideuntilready">Export CSV (Excel)</a> \
+                        <br><hr><br> \
+                        <div id="loungestats_datacontainer"> \
+                          <img src="../img/load.gif" id="loading" style="margin: 0.75em 2%"> \
+                        </div>');
+
+  if(newVersion) {
+    GM_setValue('lastversion', version);
+    $('#ajaxCont').prepend('<div id="loungestats_updateinfo" class="bpheader">LoungeStats was updated to ' + version + '!<br/>Please make sure to check <a href="http://reddit.com/r/loungestats">the subreddit</a> to see what changes were made!</div>');
+  }
+
+  $('#loungestats_settingsbutton').click(LoungeStats.Settings.show);
+
+  LoungeStats.Lounge.getBetHistory(function(err, bets){
+    if(err) throw err;
+
+    if(LoungeStats.Settings.domerge.value == "1"){
+
+      var useaccs = LoungeStats.accounts.value.active[LoungeStats.Lounge.currentAppid];
+
+      //Go trough each account requested to merge
+      useaccs.forEach(function(acc){
+        //get all bets for that acount
+        $.each(LoungeStats.getCachedBetHistory(acc), function(key, value){
+          //If no bet was placed on a game for the current account lets just use the one from the other acc merged
+          if(!bets[key]){
+            bets[key] = value;
+          }else{
+            bets[key].items.bet = bets[key].items.bet.concat(value.items.bet);
+            bets[key].items.won = bets[key].items.won.concat(value.items.won);
+            bets[key].items.lost = bets[key].items.lost.concat(value.items.lost);
+          }
+        });
+      });
+
+      // Nope, object. Just get the keys, sort and iterate by that
+      //TODO Re-sort since we might've added new bets from an alt acc
+    }
+
+    //-TODO load prices for all the items (.concat, async.each ?)
+    //Not currently since prices are preloaded and only need to be taken out of ram.
+
+    //calculate streaks, stats, ...
+
+    var overallValue = 0.0,
+        overallWon = 0.0,
+        overallLoss = 0.0,
+        overallWonCount = 0,
+        overallLostCount = 0,
+        biggestwin = 0.0,
+        biggestwinid = 0,
+        biggestloss = 0.0,
+        biggestlossid = 0,
+        // Temp variables used for finding winstreaks / loss streaks etc
+        winstreakstart = 0, winstreaktemp = 0, winstreaklast = 0,
+        losestreakstart = 0, losestreaktemp = 0, losestreaklast = 0,
+        previousBetResult = null,
+        chartData = [],
+        betData = [],
+
+        absoluteIndex = 0,
+        betsKeys = Object.keys(bets).sort(function(a, b){return parseInt(a) - parseInt(b);});
+
+    if(!betsKeys.length) return $('#loungestats_datacontainer').html('Looks like you dont have any bets with the set criteria');
+
+    var firstDate = bets[betsKeys[0]].betDate.getTime(),
+        firstDateLo = firstDate * 0.9999,
+        lastDate = bets[betsKeys[betsKeys.length - 1]].betDate.getTime(),
+        lastDateHi = lastDate * 1.0001;
+
+    betsKeys.forEach(function(key){
+      var bet = bets[key],
+          betValue = 0.0,
+          betChangeDelta = 0.0,
+          teamString = '',
+          // If you bet with two accounts, one lost, one won i need to use this variable
+          // to 'override' if you won or lost according to actual won / lost value
+          mergedWinOverride = false,
+          // Bet was either won, or lost
+          matchNotClose = ['won', 'lost'].indexOf(bet.betoutcome) !== -1;
+
+      if(matchNotClose) {
+        // Winner = 0, !0 = 1. Relieing on Lounge to be relieable here..
+        teamString = '<b>'+bet.teams[bet.winner]+'</b> vs. '+bet.teams[!bet.winner];
+        if(teamString == '<b></b> vs. ') teamString = 'Prediction';
+      } else {
+        teamString = bet.teams.join(' vs. ');
+      }
+
+      console.log(bet.items);
+
+      betValue = bet.items.bet.reduce(function(pv, cv){return pv + cv.getPrice();}, 0.0);
+      var wonValue = bet.items.won.reduce(function(pv, cv){return pv + cv.getPrice();}, 0.0);
+        overallWon += wonValue;
+      var lostValue = bet.items.lost.reduce(function(pv, cv){return pv + cv.getPrice();}, 0.0);
+        overallLoss += lostValue;
+        betChangeDelta = wonValue - lostValue;
+        overallValue += betChangeDelta;
+
+      mergedWinOverride = (betChangeDelta >= 0);
+      var betChangeDelta_s = betChangeDelta.toFixed(2);
+
+      if(previousBetResult != mergedWinOverride && matchNotClose){
+        winstreaktemp = losestreaktemp = 0;
+        previousBetResult = mergedWinOverride;
+      }
+
+
+      if(matchNotClose) if(mergedWinOverride) {
+        if(betChangeDelta > biggestwin) {
+          biggestwin = betChangeDelta;
+          biggestwinid = bet.matchId;
+        }
+        winstreaktemp++;
+        overallWonCount++;
+        if(winstreaktemp > winstreaklast) {
+          winstreakstart = absoluteIndex - (winstreaktemp - 1);
+          winstreaklast = winstreaktemp;
+        }
+        betChangeDelta = '+'+betChangeDelta.toFixed(2);
+      }else{
+        //loss
+        if(betChangeDelta < biggestloss) {
+          biggestloss = betChangeDelta * -1;
+          biggestlossid = bet.matchId;
+        }
+
+        losestreaktemp++;
+        overallLostCount++;
+        if(losestreaktemp > losestreaklast) {
+          losestreakstart = absoluteIndex - (losestreaktemp-1);
+          losestreaklast = losestreaktemp;
+        }
+        betChangeDelta = betChangeDelta.toFixed(2);
+      }
+
+      chartData.push([LoungeStats.Settings.xaxis == '0' ? bet.betDate : absoluteIndex, parseFloat(overallValue.toFixed(2)), betValue, betChangeDelta, teamString, betChangeDelta_s]);
+      if(LoungeStats.Settings.bvalue == '1') betData.push([LoungeStats.Settings.xaxis == '0' ? bet.betDate : absoluteIndex, betValue, teamString]);
+      absoluteIndex++;
+    });
+
+    console.log(chartData);
+
+    //Generate DOM content
+
+    $('#loungestats_datacontainer').empty();
+    $('#loungestats_datacontainer').append('<a id="loungestats_fullscreenbutton" class="button">Toggle Fullscreen</a><div id="loungestats_profitgraph" class="jqplot-target"></div>');
+
+    var boundary = parseInt(absoluteIndex * 0.05); if(boundary === 0) boundary = 1;
+
+    var xaxis_def = LoungeStats.Settings.xaxis == '0' ? {renderer:$.jqplot.DateAxisRenderer,tickOptions: {formatString: '%d %b %y'}, min: firstDateLo,maxx: lastDateHi} : {renderer: $.jqplot.LinearAxisRenderer, tickOptions: {formatString: '%i'}};
+
+    var plot = $.jqplot('loungestats_profitgraph', [chartData, betData], {
+      title:{text: 'Overall profit over time'},
+      gridPadding:{left: 55, right: 35, top: 25, bottom: 25},
+      axesDefaults:{ showTickMarks:false },
+      axes:{
+        xaxis: xaxis_def,
+        yaxis: {
+          pad: 1,
+          tickOptions:{formatString: '%0.2f ' + LoungeStats.Settings.currency.value, labelPosition: 'end', tooltipLocation: 'sw'}
+        }
+      },
+      canvasOverlay: {show: true},
+      grid: {gridLineColor: '#414141', borderColor: '#414141', background: '#373737'},
+      cursor: {show: true, zoom: true, showTooltip: false},
+      highlighter: {show: true, tooltipOffset: 20, fadeTooltip: true, yvalues: 4},
+      series:[{lineWidth:2, markerOptions:{show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Overall Profit: %s<br>Value bet: %s<br>Value change: %s ' + LoungeStats.Settings.currency.value + '<br>Game: %s'}},
+              {lineWidth:1, markerOptions:{show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Value bet: %s<br>Game: %s'}}],
+      seriesColors: [ '#FF8A00', '#008A00' ]
+    });
+
+    $('#loungestats_profitgraph').bind('jqplotDataClick',
+      function (ev, seriesIndex, pointIndex) {
+        window.open('/match?m='+bets[betsKeys[pointIndex]].matchid, '_blank');
+      }
+    );
+
+    $('#loungestats_profitgraph').bind('jqplotDataMouseOver', function () {
+      $('.jqplot-event-canvas').css('cursor', 'pointer');
+    });
+
+    $('#loungestats_profitgraph').on('jqplotDataUnhighlight', function() {
+      $('.jqplot-event-canvas').css('cursor', 'crosshair');
+    });
+
+    if(LoungeStats.Settings.xaxis == '0') {
+      $('#loungestats_profitgraph').dblclick(function() {plot_zomx(plot, firstDateLo, lastDateHi); clearSelection();});
+      $('#loungestats_resetzoombutton').click(function() {plot_zomx(plot, firstDateLo, lastDateHi);});
+    }else{
+      //with the linearaxisrenderer, i cant pre-set minx, and maxx, lol.
+      plot_zomx(plot, -boundary, absoluteIndex+boundary);
+      $('#loungestats_profitgraph').dblclick(function() {plot_zomx(plot, -boundary, absoluteIndex+boundary); clearSelection();});
+      $('#loungestats_resetzoombutton').click(function() {plot_zomx(plot, -boundary, absoluteIndex+boundary);});
+    }
+
+    $('#loungestats_fullscreenbutton').click(function() {toggleFullscreen(plot);plot_zomx(plot);});
+    $('.hideuntilready').removeClass("hideuntilready");
+
+    $(window).on('resize', function() {plot.replot();});
+
+    $('#loungestats_datacontainer').append('<div id="loungestats_stats_text"></div>');
+
+    $('#loungestats_stats_text').append('<hr>Overall value of items won: ' + overallWon.toFixed(2) + ' ' + LoungeStats.Settings.currency.value);
+    $('#loungestats_stats_text').append('<br>Overall value of items lost: ' + overallLoss.toFixed(2) + ' ' + LoungeStats.Settings.currency.value);
+    $('#loungestats_stats_text').append('<br>Overall won bets: ' + overallWonCount + '/' + parseInt(overallWonCount + overallLostCount) + ' (' + parseInt(100/parseInt(overallWonCount + overallLostCount)*parseInt(overallWonCount)) + '%) <a class="info">?<p class="infobox">Draws are not counted into this, only losses & wins are counted in this stat</p></a>');
+    $('#loungestats_stats_text').append('<br>Net value: ' + overallValue.toFixed(2) + ' ' + LoungeStats.Settings.currency.value);
+    $('#loungestats_stats_text').append('<br>Highest win: ' + biggestwin.toFixed(2) + ' ' + LoungeStats.Settings.currency.value + '<a href="/match?m=' + biggestwinid + '"> (Match link)</a>');
+    $('#loungestats_stats_text').append('<br>Highest loss: ' + biggestloss.toFixed(2) + ' ' + LoungeStats.Settings.currency.value + '<a href="/match?m=' + biggestlossid + '"> (Match link)</a>');
+    $('#loungestats_stats_text').append('<br>Longest losing streak: ' + losestreaklast + '<a id="loungestats_zoonon_lls" href="javascript:void(0)"> (Show on plot)</a>');
+    $('#loungestats_stats_text').append('<br>Longest winning streak: ' + winstreaklast + '<a id="loungestats_zoonon_lws" href="javascript:void(0)"> (Show on plot)</a>');
+
+    $('#loungestats_zoonon_lws').click(function() {
+      plot_zomx(plot,chartData[winstreakstart][0],chartData[winstreakstart+winstreaklast][0]);
+    }).removeAttr('id');
+    $('#loungestats_zoonon_lls').click(function() {
+      plot_zomx(plot,chartData[losestreakstart][0],chartData[losestreakstart+losestreaklast][0]);
+    }).removeAttr('id');
+
+    //TODO break out into classes / functions
+    /*$('#loungestats_csvexport').click(function(){
+      var useaccs = (!setting_domerge || setting_domerge == '0') ? [user_steam64] : accounts.active[app_id];
+      var d = new Date();
+
+      var csvContent = 'data:application/csv; charset=charset=iso-8859-1, Users represented in Export(SteamID64):;="' + useaccs.join(', ') + '"\n \
+                        Time of Export:;' + d.getUTCDate() + '-' + d.getUTCMonth() + '-' + d.getUTCFullYear() + ' ' + d.getUTCHours() + ':' + d.getUTCMinutes() + '\n \
+                        Currency:;'+currencyText+'\n \
+                        Bet Data:\n \
+                        Game;Date;Match ID;Bet Outcome;Bet Value;Value Change;Overall Profit;Bet Items;Won Items;Lost Items\n';
+
+      for(var i in betsKeys) {
+        var b = bets[betsKeys[i]];
+        var c = chartData[i];
+        var betdate = b.date;
+
+        csvContent += c[4].replace('<b>','[').replace('</b>',']') +';'+ b.date +';'+ b.matchid +';'+ b.matchoutcome +';'+ forceExcelDecimal(c[2],true) +';'+ forceExcelDecimal(c[5],true) +';'+ forceExcelDecimal(c[1],true) +';'+ b.items.bet.join(', ') +';'+ b.items.won.join(', ') +';'+ b.items.lost.join(', ') +'\n';
+      }
+
+      var encodedUri = encodeURI(csvContent);
+      var link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", "LoungeStats_Export.csv");
+      link.click();
+    }).removeAttr('id');
+
+    $('#loungestats_screenshotbutton').click(function(){
+      if($('#loungestats_screenshotbutton').text() != "Screenshot") return;
+      alert("The Screenshot will be taken in 4 Seconds so that you can Hover a bet if you want to...\n\n You can also quickly put the graph in Fullscreen mode!");
+      $('#loungestats_screenshotbutton').text("Waiting");
+      setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting.")},1000);
+      setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting..")},2000);
+      setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting...")},3000);
+      setTimeout(function(){
+        $('#loungestats_screenshotbutton').text("Uploading...");
+        //$('#loungestats_profitgraph').attr("style", "width: 900px; height: 450px;");
+        //plot.replot();
+        var canvas = $("#loungestats_profitgraph").find('.jqplot-grid-canvas, .jqplot-series-shadowCanvas, .jqplot-series-canvas, .jqplot-highlight-canvas');
+        var w = canvas[0].width;
+        var h = canvas[0].height;
+        var newCanvas = $('<canvas/>').attr('width',w).attr('height',h)[0];
+        var context = newCanvas.getContext("2d");
+        context.fillStyle = "#FFF";
+        context.fillRect(0, 0, w, h);
+        context.fillStyle = "#000";
+        $(canvas).each(function() {
+          context.drawImage(this, this.style.left.replace("px",""), this.style.top.replace("px",""));
+        });
+
+        context.font="11px Arial";
+        var yaxis = $("#loungestats_profitgraph .jqplot-yaxis");
+        $(yaxis.children()).each(function() {
+          context.fillText(this.textContent, 3, parseInt(this.style.top)+10);
+        });
+        var xaxis = $("#loungestats_profitgraph .jqplot-xaxis");
+        $(xaxis.children()).each(function() {
+          context.fillText(this.textContent, parseInt(this.style.left)+1, h-12);
+        });
+        var ttip = $("#loungestats_profitgraph .jqplot-highlighter-tooltip")[0];
+        if(ttip.style.display != "none"){
+          var topoffset = parseInt(ttip.style.top);
+          if(topoffset < 20) topoffset = 20;
+          context.font="16px Arial";
+          context.fillStyle = "rgba(57,57,57,.8)";
+          context.strokeStyle = "#808080";
+          context.fillRect(parseInt(ttip.style.left), topoffset, ttip.clientWidth, ttip.clientHeight);
+          context.lineWidth="1";
+          context.rect(parseInt(ttip.style.left), topoffset, ttip.clientWidth, ttip.clientHeight);
+          context.stroke();
+          context.fillStyle = "rgba(220,220,220,.8)";
+          var strs = ttip.innerHTML.replace(/<br>/g,"|").replace(/<.+?>/g,"").split("|");
+          for(var i = 0; i < strs.length; i++) context.fillText(strs[i], parseInt(ttip.style.left)+5, topoffset+18+(i*16))
+        }
+        context.font="14px Arial";
+        context.fillStyle = "#000";
+        //$('#loungestats_profitgraph').removeAttr("style");
+        //plot.replot();
+        context.textAlign = 'center';
+        context.font="bold 15px Arial";
+        context.fillText("LoungeStats Profit Graph ("+(app_id == '730' ? "CS:GO" : "DotA")+") | http://reddit.com/r/LoungeStats", w/2, 17);
+
+        $.ajax({
+          url: 'https://api.imgur.com/3/image',
+          type: 'post',
+          headers: {
+            Authorization: 'Client-ID 449ec55696fd751'
+          },
+          data: {
+            image: newCanvas.toDataURL("image/jpeg", 0.92).replace("data:image/jpeg;base64,",""),
+            title: "LoungeStats Profit Graph Autoupload",
+            description: "Visit http://reddit.com/r/LoungeStats for more infos!"
+          },
+          dataType: 'json',
+          success: function(response) {
+            if(response.success) {
+              var myPopup = window.open(response.data.link, "", "directories=no,height="+h+",width="+w+",menubar=no,resizable=no,scrollbars=no,status=no,titlebar=no,top=0,location=no");
+              if (!myPopup)
+                alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+              else {
+                $('#loungestats_screenshotbutton').text("Screenshot");
+                myPopup.onload = function() {
+                  setTimeout(function() {
+                    if (myPopup.screenX === 0) alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+                  }, 0);
+                };
+              }
+            }
+          },
+          error: function(){
+            $('#loungestats_screenshotbutton').text("Screenshot");
+            alert("Sorry, uploading the image to imgur failed :(\n\nTry it again in a second and doublecheck that imgur is up!");
+          }
+        });
+      }, 4000);
+    })*/
+  });
+};
+
 async.series([PriceProvider.init.bind(PriceProvider),
               ConversionRateProvider.init.bind(ConversionRateProvider),
               LoungeStats.init.bind(LoungeStats)], function(err){
   if(err) return alert(err);
-
-  LoungeStats.Lounge.getBetHistory(function(err, bets){
-    if(err) return;
-
-    if(LoungeStats.Settings.domerge.getValue() == "1"){
-
-      var useaccs = LoungeStats.accounts.getValue().active[LoungeStats.Lounge.currentAppid];
-
-      useaccs.forEach(function(acc){
-        var bhistory = LoungeStats.getBetHistory(acc);
-
-        //TODO give all the bet items the proto of SteamItem, and merge them together with the current account's bets
-        //Possibly, if an alt acc has a bet the current one doesnt we need to insert a new bet from that account
-      });
-
-      //TODO Re-sort since we might've added new bets from an alt acc
-    }
-
-    //TODO load prices for all the items (.concat, async.each ?)
-
-    //TODO calculate streaks, stats, ...
-
-    //TODO Generate DOM content
-
-    //TODO Plot graph...
-  });
 });
-
-
-
-//LoungeStats.Settings.show();
