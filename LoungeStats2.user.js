@@ -627,7 +627,7 @@ LoungeStatsClass.prototype = {
 var LoungeStats = new LoungeStatsClass();
 
 LoungeStats.loadStats = function(){
-	if(!LoungeStats.Settings.method){
+	if(!LoungeStats.Settings.method.value){
 		$('#ajaxCont').html('Please set up Loungestats first');
 		return LoungeStats.Settings.show();
 	}
@@ -745,7 +745,6 @@ LoungeStats.loadStats = function(){
 				previousBetResult = mergedWinOverride;
 			}
 
-
 			if(matchNotClose) if(mergedWinOverride) {
 				if(betChangeDelta > biggestwin) {
 					biggestwin = betChangeDelta;
@@ -774,8 +773,8 @@ LoungeStats.loadStats = function(){
 				betChangeDelta = betChangeDelta.toFixed(2);
 			}
 
-			chartData.push([LoungeStats.Settings.xaxis == '0' ? bet.betDate : absoluteIndex, parseFloat(overallValue.toFixed(2)), betValue, betChangeDelta, teamString, betChangeDelta_s]);
-			if(LoungeStats.Settings.bvalue == '1') betData.push([LoungeStats.Settings.xaxis == '0' ? bet.betDate : absoluteIndex, betValue, teamString]);
+			chartData.push([LoungeStats.Settings.xaxis.value == '0' ? bet.betDate : absoluteIndex, parseFloat(overallValue.toFixed(2)), betValue, betChangeDelta, teamString, betChangeDelta_s]);
+			if(LoungeStats.Settings.bvalue.value == '1') betData.push([LoungeStats.Settings.xaxis.value == '0' ? bet.betDate : absoluteIndex, betValue, teamString]);
 			absoluteIndex++;
 		});
 
@@ -786,12 +785,12 @@ LoungeStats.loadStats = function(){
 
 		var boundary = parseInt(absoluteIndex * 0.05); if(boundary === 0) boundary = 1;
 
-		var xaxis_def = LoungeStats.Settings.xaxis == '0' ? {renderer:$.jqplot.DateAxisRenderer,tickOptions: {formatString: '%d %b %y'}, min: firstDateLo,maxx: lastDateHi} : {renderer: $.jqplot.LinearAxisRenderer, tickOptions: {formatString: '%i'}};
+		var xaxis_def = LoungeStats.Settings.xaxis.value == '0' ? {renderer:$.jqplot.DateAxisRenderer,tickOptions: {formatString: '%d %b %y'}, min: firstDateLo,maxx: lastDateHi} : {renderer: $.jqplot.LinearAxisRenderer, tickOptions: {formatString: '%i'}};
 
 		var plot = $.jqplot('loungestats_profitgraph', [chartData, betData], {
-			title:{text: 'Overall profit over time'},
-			gridPadding:{left: 55, right: 35, top: 25, bottom: 25},
-			axesDefaults:{ showTickMarks:false },
+			title: {text: 'Overall profit over time'},
+			gridPadding: {left: 55, right: 35, top: 25, bottom: 25},
+			axesDefaults: {showTickMarks:false},
 			axes:{
 				xaxis: xaxis_def,
 				yaxis: {
@@ -803,9 +802,9 @@ LoungeStats.loadStats = function(){
 			grid: {gridLineColor: '#414141', borderColor: '#414141', background: '#373737'},
 			cursor: {show: true, zoom: true, showTooltip: false},
 			highlighter: {show: true, tooltipOffset: 20, fadeTooltip: true, yvalues: 4},
-			series:[{lineWidth:2, markerOptions:{show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Overall Profit: %s<br>Value bet: %s<br>Value change: %s ' + LoungeStats.Settings.currency.value + '<br>Game: %s'}},
-							{lineWidth:1, markerOptions:{show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Value bet: %s<br>Game: %s'}}],
-			seriesColors: [ '#FF8A00', '#008A00' ]
+			series:[{lineWidth: 2, markerOptions: {show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Overall Profit: %s<br>Value bet: %s<br>Value change: %s ' + LoungeStats.Settings.currency.value + '<br>Game: %s'}},
+							{lineWidth: 1, markerOptions: {show: false, style:'circle'}, highlighter: {formatString: '<strong>%s</strong><br>Value bet: %s<br>Game: %s'}}],
+			seriesColors: ['#FF8A00', '#008A00']
 		});
 
 		$('#loungestats_profitgraph').bind('jqplotDataClick',
@@ -822,7 +821,7 @@ LoungeStats.loadStats = function(){
 			$('.jqplot-event-canvas').css('cursor', 'crosshair');
 		});
 
-		if(LoungeStats.Settings.xaxis == '0') {
+		if(LoungeStats.Settings.xaxis.value == '0') {
 			$('#loungestats_profitgraph').dblclick(function() {plot_zomx(plot, firstDateLo, lastDateHi); clearSelection();});
 			$('#loungestats_resetzoombutton').click(function() {plot_zomx(plot, firstDateLo, lastDateHi);});
 		}else{
@@ -976,5 +975,5 @@ LoungeStats.loadStats = function(){
 async.series([PriceProvider.init.bind(PriceProvider),
 							ConversionRateProvider.init.bind(ConversionRateProvider),
 							LoungeStats.init.bind(LoungeStats)], function(err){
-	if(err) $('#ajaxCont').html(err);
+	if(err) alert("LoungeStats could not be initialized, please try again later: " + err);
 });
