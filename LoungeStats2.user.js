@@ -128,22 +128,25 @@ var PriceProvider = {
 			this.cache = JSON.parse(this.cache);
 		}catch(e){ this.cache = null; }
 
-		if(!this.cache || true/*Checken ob daten älter als 3 Tage sind*/){
-			//Aktuelle daten vom RAW Github laden, speichern
+	  //if the cache is older than 48 hours re-load it
+		if(!this.cache || (new Date().getTime() - Number(GM_getValue('pricedb_lastload') || 0)) > 518400000){
+			//Load latest price database from github and cache it
 			$.ajax({
 				url: "https://raw.githubusercontent.com/kinsi55/LoungeStats2/master/misc/pricedb.json",
 				dataType: "json"
 			}).done(function(parsed) {
-				if(parsed[APP_CSGO]/* && parsed[APP_DOTA]*/){ //TODO remove when cache is gone..
+				if(parsed[APP_CSGO] && parsed[APP_DOTA]){
 					GM_setValue("pricedb", JSON.stringify(parsed));
 					this.cache = parsed;
 				}
 
-				console.log(this.cache.success);
+				if(!this.cache || this.cache.success !== 1) return callback("Couldnt load pricedb from repo..");
 
-				if(!this.cache || this.cache.success !== 1) throw "Couldnt load pricedb from repo..";
+				GM_setValue('pricedb_lastload', new Date().getTime());
 
 				if(callback) callback();
+			}).error(function(){
+				if(callback) callback("Couldnt load pricedb from repo..");
 			});
 		}else{
 			if(callback) callback();
@@ -172,8 +175,8 @@ var ConversionRateProvider = {
 		return amount / this.cache.rates[from_currency] * this.cache.rates[to_currency];
 	},
 	/**
-	 * get available currencies
-	 * @return {Array}               Available currencies
+	 * Get available currencies
+	 * @return {Array} Available currencies
 	 */
 	getAvailableCurrencies: function(){
 		if(!this.cache) throw "No prices cached...";
@@ -190,17 +193,23 @@ var ConversionRateProvider = {
 			this.cache = JSON.parse(this.cache);
 		}catch(e){ this.cache = null; }
 
-		if(!this.cache || false/*Checken ob daten älter als 3 Tage sind*/){
-			//Aktuelle daten vom RAW Github laden, speichern
-			$.get("https://api.fixer.io/latest?base=USD", function(parsed){
+		if(!this.cache || (new Date().getTime() - Number(GM_getValue('fixer_lastload') || 0)) > 259200000){
+			$.ajax({
+				url: "https://api.fixer.io/latest?base=USD",
+				dataType: "json"
+			}).done(function(parsed) {
 				if(parsed.base === "USD" && parsed.rates.EUR){
 					GM_setValue("convert_fixer", JSON.stringify(parsed));
 					this.cache = parsed;
 				}
 
-				if(!this.cache) throw "Couldnt load exchange rates from fixer..";
+				if(!this.cache) return callback("Couldnt load exchange rates from fixer..");
+
+				GM_setValue('fixer_lastload', new Date().getTime());
 
 				if(callback) callback();
+			}).error(function(){
+				if(callback) callback("Couldnt load pricedb from repo..");
 			});
 		}else{
 			this.cache = JSON.parse(GM_getValue("convert_fixer"));
@@ -358,7 +367,7 @@ var LoungeStatsClass = function(){
 		this.json = json === true;
 		this.name = name;
 		this.fieldid = fieldid || json;
-		if(this.fieldid === json) this.fieldid = undefined;
+		if(this.fieldid === this.json) this.fieldid = undefined;
 
 		this._val = GM_getValue('setting_'+this.name);
 
@@ -383,7 +392,7 @@ var LoungeStatsClass = function(){
 			if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this._val));
 		},
 		populateFormField: function(){
-			console.log($('.loungestatsSetting#'+this.name), this._val);
+			console.log(this.fieldid, !this.json, this._val, $('.loungestatsSetting#'+this.name));
 			if(this.fieldid && !this.json && this._val) $('.loungestatsSetting#'+this.name).val(this._val);
 		},
 	};
