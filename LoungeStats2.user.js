@@ -27,7 +27,6 @@
 // You are not allowed to sell the whole, or parts of this script
 // Copyright belongs to "Kinsi" (user Kinsi55 on reddit, /id/kinsi on steam)
 
-//
 'use strict';
 
 var version = GM_info.script.version;
@@ -97,63 +96,6 @@ function isValidDate(s) {
 	return d && (d.getMonth() + 1) == bits[1] && d.getDate() == Number(bits[0]);
 }
 
-
-/**
- * Broken out object for handling loading of item prices incase i should add / switch providers in the future
- * @type {Object}
- */
-var PriceProvider = {
-	/**
-	 * Returns the price out of the cached price database if available
-	 * @param  {integer}   appId    app id which this item belongs to
-	 * @param  {String}   itemName name of the item wanted
-	 * @param  {Function} callback callback function to pipe the price to
-	 * @return {Float}            items price
-	 */
-	getPriceFor: function(itemName, appId, callback){
-		if(!this.cache) throw "No prices cached...";
-		if(!this.cache[appId][itemName]) throw "Requested item not found"; //Possibly report back and / or fallback to loading from market?
-
-		var p = parseFloat(this.cache[appId][itemName]) / 100;
-		if(callback) callback(null, p);
-		return p;
-	},
-	/**
-	 * Load the locally cached, or externally refreshed price DB in and load it into RAM
-	 * @param  {Function} callback callback when done
-	 */
-	init: function(callback){
-		this.cache = GM_getValue('pricedb');
-		if(this.cache) try{
-			this.cache = JSON.parse(this.cache);
-		}catch(e){ this.cache = null; }
-
-	  //if the cache is older than 48 hours re-load it
-		if(!this.cache || (new Date().getTime() - Number(GM_getValue('pricedb_lastload') || 0)) > 518400000){
-			//Load latest price database from github and cache it
-			$.ajax({
-				url: "https://raw.githubusercontent.com/kinsi55/LoungeStats2/master/misc/pricedb.json",
-				dataType: "json"
-			}).done(function(parsed) {
-				if(parsed[APP_CSGO] && parsed[APP_DOTA]){
-					GM_setValue("pricedb", JSON.stringify(parsed));
-					this.cache = parsed;
-				}
-
-				if(!this.cache || this.cache.success !== 1) return callback("Couldnt load pricedb from repo..");
-
-				GM_setValue('pricedb_lastload', new Date().getTime());
-
-				if(callback) callback();
-			}).error(function(){
-				if(callback) callback("Couldnt load pricedb from repo..");
-			});
-		}else{
-			if(callback) callback();
-		}
-	}
-};
-
 /**
  * Broken out object for handling currency conversion
  * @type {Object}
@@ -199,6 +141,7 @@ var ConversionRateProvider = {
 				dataType: "json"
 			}).done(function(parsed) {
 				if(parsed.base === "USD" && parsed.rates.EUR){
+					parsed.rates["USD"] = 1.0;
 					GM_setValue("convert_fixer", JSON.stringify(parsed));
 					this.cache = parsed;
 				}
@@ -215,6 +158,72 @@ var ConversionRateProvider = {
 			this.cache = JSON.parse(GM_getValue("convert_fixer"));
 			if(callback) callback();
 		}
+	}
+};
+
+/**
+ * Broken out object for handling loading of item prices incase i should add / switch providers in the future
+ * @type {Object}
+ */
+var PriceProvider = {
+	/**
+	 * Returns the price out of the cached price database if available
+	 * @param  {integer}   appId    app id which this item belongs to
+	 * @param  {String}   itemName name of the item wanted
+	 * @param  {Function} callback callback function to pipe the price to
+	 * @return {Float}            items price
+	 */
+	getPriceFor: function(itemName, appId, callback){
+		if(!this.cache) throw "No prices cached...";
+		if(!this.cache[appId][itemName]) throw "Requested item not found (" + appId + "/" + itemName + ")"; //Possibly report back and / or fallback to loading from market?
+
+		var p = parseFloat(this.cache[appId][itemName]) / 100;
+
+		p = ConversionRateProvider.convert(p, this.destinationCurrency);
+		if(callback) callback(null, p);
+		return p;
+	},
+	/**
+	 * Load the locally cached, or externally refreshed price DB in and load it into RAM
+	 * @param  {Function} callback callback when done
+	 */
+	init: function(callback){
+		this.cache = GM_getValue('pricedb');
+		this.destinationCurrency = "USD";
+		if(this.cache) try{
+			this.cache = JSON.parse(this.cache);
+		}catch(e){ this.cache = null; }
+
+		//if the cache is older than 48 hours re-load it
+		if(!this.cache || (new Date().getTime() - Number(GM_getValue('pricedb_lastload') || 0)) > 518400000){
+			//Load latest price database from github and cache it
+			$.ajax({
+				url: "https://raw.githubusercontent.com/kinsi55/LoungeStats2/master/misc/pricedb.json",
+				dataType: "json"
+			}).done(function(parsed) {
+				if(parsed[APP_CSGO] && parsed[APP_DOTA]){
+					GM_setValue("pricedb", JSON.stringify(parsed));
+					this.cache = parsed;
+				}
+
+				if(!this.cache || this.cache.success !== 1) return callback("Couldnt load pricedb from repo..");
+
+				GM_setValue('pricedb_lastload', new Date().getTime());
+
+				if(callback) callback();
+			}).error(function(){
+				if(callback) callback("Couldnt load pricedb from repo..");
+			});
+		}else{
+			if(callback) callback();
+		}
+	},
+	/**
+	 * Load the locally cached, or externally refreshed price DB in and load it into RAM
+	 * @param  {Function} callback callback when done
+	 */
+	setWantedCurrency: function(destinationCurrency){
+		this.destinationCurrency = destinationCurrency;
 	}
 };
 
@@ -290,7 +299,6 @@ LoungeClass.prototype.currentAccountId = $('#profile .full:last-child input').va
 LoungeClass.prototype.betHistoryEntry = function(betRowJq, betItemsJq, wonItemsJq, appId){
 	//Map bet item Row to all contained Item names
 	var filterForItems = function(toFilter){
-		console.log(toFilter);
 		return toFilter
 		.find('div > div.name > b:first-child').get()
 		.map(function(e){
@@ -392,7 +400,7 @@ var LoungeStatsClass = function(){
 			if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this._val));
 		},
 		populateFormField: function(){
-			console.log(this.fieldid, !this.json, this._val, $('.loungestatsSetting#'+this.name));
+			//console.log(this.fieldid, !this.json, this._val, $('.loungestatsSetting#'+this.name));
 			if(this.fieldid && !this.json && this._val) $('.loungestatsSetting#'+this.name).val(this._val);
 		},
 	};
@@ -429,6 +437,12 @@ var LoungeStatsClass = function(){
 			alert('The format of the given date is invalid! Use Day.Month.Year!');
 			return;
 		}
+
+		var x = this.Settings.accounts.value;
+		x.active[this.Lounge.currentAppid] = $("#loungestats_mergepicks input:checked").map(function(){return $(this).attr("name")}).toArray();
+		this.Settings.accounts.value = x;
+
+		PriceProvider.setWantedCurrency(this.Settings.currency.value);
 		this.Settings.close();
 	}.bind(this);
 
@@ -446,13 +460,16 @@ var LoungeStatsClass = function(){
 		for(var i in this.Settings.accounts.value.available[this.Lounge.currentAppid]) {
 			var sett_is_checked = this.Settings.accounts.value.active[this.Lounge.currentAppid].indexOf(i) != -1 ? 'checked' : '';
 
-			multiaccthing += '<input type="checkbox" name="'+i+'" '+sett_is_checked+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+this.getCachedBetHistory(i).length+' bets cached</a>"<br/>';
+			multiaccthing += '<input type="checkbox" name="'+i+'" '+sett_is_checked+'> "<a href="http://steamcommunity.com/profiles/'+i+'" target="_blank">'+Object.keys(this.getCachedBetHistory(i)).length+' bets cached</a>"<br/>';
 		}
 		$('#loungestats_mergepicks').html(multiaccthing);
 
 		$('#loungestats_overlay').fadeIn(500);
 	}.bind(this);
 
+	/**
+	 * Helperfunction called to close the settingswindow
+	 */
 	this.Settings.close = function(){
 		$('#loungestats_overlay').fadeOut(500);
 	};
@@ -576,6 +593,8 @@ LoungeStatsClass.prototype = {
 
 		$(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
 
+		PriceProvider.setWantedCurrency(this.Settings.currency.value);
+
 		callback();
 	},
 	/**
@@ -589,8 +608,6 @@ LoungeStatsClass.prototype = {
 		x.available[this.Lounge.currentAppid][this.Lounge.currentAccountId] = betHistory;
 
 		this.Settings.accounts.value = x;
-
-		console.log("CACHED!", x);
 	},
 	/**
 	 * Get the previously cached bet history for the defined account
@@ -601,24 +618,23 @@ LoungeStatsClass.prototype = {
 		if(!requestedAccount) requestedAccount = this.Lounge.currentAccountId;
 		var h = this.Settings.accounts.value.available[this.Lounge.currentAppid][requestedAccount];
 
-		Object.keys(h).forEach(function(key){
-			console.log(h[key] instanceof LoungeClass.prototype.betHistoryEntry);
+		//console.log(requestedAccount, h);
 
+		Object.keys(h).forEach(function(key){
+			//console.log(h[key] instanceof LoungeClass.prototype.betHistoryEntry);
 
 			h[key].__proto__ = LoungeClass.prototype.betHistoryEntry.prototype;
 
-			console.log(h[key] instanceof LoungeClass.prototype.betHistoryEntry);
+			//console.log(h[key] instanceof LoungeClass.prototype.betHistoryEntry);
 
 			h[key].betDate = new Date(Date.parse(h[key].betDate));
 
-			//h[key].items.won = h[key].items.won.map(function(i){return i.constructor.call(SteamItem.prototype);});
-			//h[key].items.bet = h[key].items.bet.map(function(i){return i.constructor.call(SteamItem.prototype);});
-			//h[key].items.lost = h[key].items.lost.map(function(i){return i.constructor.call(SteamItem.prototype);});
+			h[key].items.won = h[key].items.won.map(function(i){return new SteamItem(i.name, i.appid);});
+			h[key].items.bet = h[key].items.bet.map(function(i){return new SteamItem(i.name, i.appid);});
+			h[key].items.lost = h[key].items.lost.map(function(i){return new SteamItem(i.name, i.appid);});
 		});
 
-		console.log(h);
-		console.log(h);
-		console.log(h);
+		//console.log(h);
 
 		return h;
 	}
@@ -635,14 +651,14 @@ LoungeStats.loadStats = function(){
 	$(window).off('resize');
 
 	$('#ajaxCont').html('<a id="loungestats_settingsbutton" class="button">LoungeStats Settings</a> \
-		<a class="button" target="_blank" href="http://steamcommunity.com/tradeoffer/new/?partner=33309635&token=H0lCbkY3">Donate ♥</a> \
-												<a class="button" target="_blank" href="http://reddit.com/r/LoungeStats">Subreddit</a> \
+		<a class="button" target="_blank" href="https://steamcommunity.com/tradeoffer/new/?partner=33309635&token=H0lCbkY3">Donate ♥</a> \
+												<a class="button" target="_blank" href="https://reddit.com/r/LoungeStats">Subreddit</a> \
 												<a id="loungestats_resetzoombutton" class="button hideuntilready">Reset Zoom</a> \
 												<a id="loungestats_screenshotbutton" class="button hideuntilready">Screenshot</a> \
 												<a id="loungestats_csvexport" class="button hideuntilready">Export CSV (Excel)</a> \
 												<br><hr><br> \
 												<div id="loungestats_datacontainer"> \
-													<img src="../img/load.gif" id="loading" style="margin: 0.75em 2%"> \
+													<img src="/img/load.gif" id="loading" style="margin: 0.75em 2%"> \
 												</div>');
 
 	if(newVersion) {
@@ -655,16 +671,15 @@ LoungeStats.loadStats = function(){
 	LoungeStats.Lounge.getBetHistory(function(err, bets){
 		if(err) return $('#ajaxCont').html(err);
 
-		//LoungeStats.cacheBetHistory(bets);
+		LoungeStats.cacheBetHistory(bets);
 
 		if(LoungeStats.Settings.domerge.value == "1"){
-
 			var useaccs = LoungeStats.Settings.accounts.value.active[LoungeStats.Lounge.currentAppid];
 
 			//Go trough each account requested to merge
 			useaccs.forEach(function(acc){
 				//Do not merge the current account from cache
-				if(acc == LoungeStats.Lounge.currentAccountId) return;
+				//if(acc == LoungeStats.Lounge.currentAccountId) return;
 				//get all bets for that acount
 				$.each(LoungeStats.getCachedBetHistory(acc), function(key, value){
 					//If no bet was placed on a game for the current account lets just use the one from the other acc merged
@@ -858,122 +873,105 @@ LoungeStats.loadStats = function(){
 		/*$('#loungestats_csvexport').click(function(){
 			var useaccs = (!setting_domerge || setting_domerge == '0') ? [user_steam64] : accounts.active[app_id];
 			var d = new Date();
-
 			var csvContent = 'data:application/csv; charset=charset=iso-8859-1, Users represented in Export(SteamID64):;="' + useaccs.join(', ') + '"\n \
 												Time of Export:;' + d.getUTCDate() + '-' + d.getUTCMonth() + '-' + d.getUTCFullYear() + ' ' + d.getUTCHours() + ':' + d.getUTCMinutes() + '\n \
 												Currency:;'+currencyText+'\n \
 												Bet Data:\n \
 												Game;Date;Match ID;Bet Outcome;Bet Value;Value Change;Overall Profit;Bet Items;Won Items;Lost Items\n';
-
 			for(var i in betsKeys) {
 				var b = bets[betsKeys[i]];
 				var c = chartData[i];
 				var betdate = b.date;
-
 				csvContent += c[4].replace('<b>','[').replace('</b>',']') +';'+ b.date +';'+ b.matchid +';'+ b.matchoutcome +';'+ forceExcelDecimal(c[2],true) +';'+ forceExcelDecimal(c[5],true) +';'+ forceExcelDecimal(c[1],true) +';'+ b.items.bet.join(', ') +';'+ b.items.won.join(', ') +';'+ b.items.lost.join(', ') +'\n';
 			}
-
 			var encodedUri = encodeURI(csvContent);
 			var link = document.createElement("a");
 			link.setAttribute("href", encodedUri);
 			link.setAttribute("download", "LoungeStats_Export.csv");
 			link.click();
-		}).removeAttr('id');
+		}).removeAttr('id');*/
 
 		$('#loungestats_screenshotbutton').click(function(){
 			if($('#loungestats_screenshotbutton').text() != "Screenshot") return;
 			alert("The Screenshot will be taken in 4 Seconds so that you can Hover a bet if you want to...\n\n You can also quickly put the graph in Fullscreen mode!");
 			$('#loungestats_screenshotbutton').text("Waiting");
-			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting.")},1000);
-			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting..")},2000);
-			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting...")},3000);
+			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting.")}, 1000);
+			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting..")}, 2000);
+			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting...")}, 3000);
 			setTimeout(function(){
 				$('#loungestats_screenshotbutton').text("Uploading...");
-				//$('#loungestats_profitgraph').attr("style", "width: 900px; height: 450px;");
-				//plot.replot();
+
+				// Find needed stuff
 				var canvas = $("#loungestats_profitgraph").find('.jqplot-grid-canvas, .jqplot-series-shadowCanvas, .jqplot-series-canvas, .jqplot-highlight-canvas');
-				var w = canvas[0].width;
-				var h = canvas[0].height;
-				var newCanvas = $('<canvas/>').attr('width',w).attr('height',h)[0];
-				var context = newCanvas.getContext("2d");
+						w = canvas[0].width,
+						h = canvas[0].height,
+						newCanvas = $('<canvas/>').attr('width', w).attr('height', h)[0],
+						context = newCanvas.getContext("2d");
+
+				//Fill white background
 				context.fillStyle = "#FFF";
 				context.fillRect(0, 0, w, h);
 				context.fillStyle = "#000";
+				//Draw all canvas elements in the jqplot onto the new canvas
 				$(canvas).each(function() {
-					context.drawImage(this, this.style.left.replace("px",""), this.style.top.replace("px",""));
+					context.drawImage(this, this.style.left.replace("px", ""), this.style.top.replace("px", ""));
 				});
-
-				context.font="11px Arial";
+				//Populate Y axis in new canvas
+				context.font = "11px Arial";
 				var yaxis = $("#loungestats_profitgraph .jqplot-yaxis");
 				$(yaxis.children()).each(function() {
-					context.fillText(this.textContent, 3, parseInt(this.style.top)+10);
+					context.fillText(this.textContent, 3, parseInt(this.style.top) + 10);
 				});
+				//Populate X axis in new canvas
 				var xaxis = $("#loungestats_profitgraph .jqplot-xaxis");
 				$(xaxis.children()).each(function() {
-					context.fillText(this.textContent, parseInt(this.style.left)+1, h-12);
+					context.fillText(this.textContent, parseInt(this.style.left) + 1, h - 12);
 				});
+				//Draw Tooltip onto new canvas if currently displayed in DOM
 				var ttip = $("#loungestats_profitgraph .jqplot-highlighter-tooltip")[0];
 				if(ttip.style.display != "none"){
 					var topoffset = parseInt(ttip.style.top);
 					if(topoffset < 20) topoffset = 20;
-					context.font="16px Arial";
-					context.fillStyle = "rgba(57,57,57,.8)";
+					context.font = "16px Arial";
+					context.fillStyle = "rgba(57, 57, 57, .8)";
 					context.strokeStyle = "#808080";
 					context.fillRect(parseInt(ttip.style.left), topoffset, ttip.clientWidth, ttip.clientHeight);
-					context.lineWidth="1";
+					context.lineWidth = "1";
 					context.rect(parseInt(ttip.style.left), topoffset, ttip.clientWidth, ttip.clientHeight);
 					context.stroke();
-					context.fillStyle = "rgba(220,220,220,.8)";
+					context.fillStyle = "rgba(220, 220, 220, .8)";
 					var strs = ttip.innerHTML.replace(/<br>/g,"|").replace(/<.+?>/g,"").split("|");
-					for(var i = 0; i < strs.length; i++) context.fillText(strs[i], parseInt(ttip.style.left)+5, topoffset+18+(i*16))
+					for(var i = 0; i < strs.length; i++) context.fillText(strs[i], parseInt(ttip.style.left) + 5, topoffset + 18 + (i * 16))
 				}
-				context.font="14px Arial";
+				//Header.
+				context.font = "14px Arial";
 				context.fillStyle = "#000";
-				//$('#loungestats_profitgraph').removeAttr("style");
-				//plot.replot();
 				context.textAlign = 'center';
-				context.font="bold 15px Arial";
-				context.fillText("LoungeStats Profit Graph ("+(app_id == '730' ? "CS:GO" : "DotA")+") | http://reddit.com/r/LoungeStats", w/2, 17);
+				context.font = "bold 15px Arial";
+				context.fillText("LoungeStats Profit Graph ("+(app_id == '730' ? "CS:GO" : "DotA")+") | http://reddit.com/r/LoungeStats", w / 2, 17);
 
-				$.ajax({
-					url: 'https://api.imgur.com/3/image',
-					type: 'post',
-					headers: {
-						Authorization: 'Client-ID 449ec55696fd751'
-					},
-					data: {
-						image: newCanvas.toDataURL("image/jpeg", 0.92).replace("data:image/jpeg;base64,",""),
-						title: "LoungeStats Profit Graph Autoupload",
-						description: "Visit http://reddit.com/r/LoungeStats for more infos!"
-					},
-					dataType: 'json',
-					success: function(response) {
-						if(response.success) {
-							var myPopup = window.open(response.data.link, "", "directories=no,height="+h+",width="+w+",menubar=no,resizable=no,scrollbars=no,status=no,titlebar=no,top=0,location=no");
-							if (!myPopup)
-								alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
-							else {
-								$('#loungestats_screenshotbutton').text("Screenshot");
-								myPopup.onload = function() {
-									setTimeout(function() {
-										if (myPopup.screenX === 0) alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
-									}, 0);
-								};
-							}
-						}
-					},
-					error: function(){
-						$('#loungestats_screenshotbutton').text("Screenshot");
-						alert("Sorry, uploading the image to imgur failed :(\n\nTry it again in a second and doublecheck that imgur is up!");
+				new ImgurUploader().uploadFromCanvas(newCanvas, "LoungeStats Profit Graph Autoupload", "Visit http://reddit.com/r/LoungeStats for more infos!", function(err, imagelink){
+					$('#loungestats_screenshotbutton').text("Screenshot");
+					if(err) return alert("Sorry, uploading the image to imgur failed :(\n\nTry it again in a second and doublecheck that imgur is up!");
+
+					var myPopup = window.open(response.data.link, "", "directories=no,height="+h+",width="+w+",menubar=no,resizable=no,scrollbars=no,status=no,titlebar=no,top=0,location=no");
+					if (!myPopup){
+						alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+					} else {
+						myPopup.onload = function() {
+							setTimeout(function() {
+								if (myPopup.screenX === 0) alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+							}, 0);
+						};
 					}
-				});
+				}.bind(this));
 			}, 4000);
-		})*/
+		});
 	});
 };
 
 async.series([PriceProvider.init.bind(PriceProvider),
 							ConversionRateProvider.init.bind(ConversionRateProvider),
 							LoungeStats.init.bind(LoungeStats)], function(err){
-	if(err) alert("LoungeStats could not be initialized, please try again later: " + err);
+	if(err) $('#ajaxCont').html(err);
 });
