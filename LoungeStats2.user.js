@@ -175,7 +175,7 @@ var PriceProvider = {
 	 */
 	getPriceFor: function(itemName, appId, callback, fallback){
 		if(!this.cache) throw "No prices cached...";
-		if(!this.cache[appId][itemName] && fallback) throw "Requested item not found (" + appId + "/" + itemName + ")"; //Possibly report back and / or fallback to loading from market?
+		if(!this.cache[appId][itemName] && !fallback) throw "Requested item not found (" + appId + "/" + itemName + ")"; //Possibly report back and / or fallback to loading from market?
 
 		var p = parseFloat(this.cache[appId][itemName] || fallback) / 100;
 
