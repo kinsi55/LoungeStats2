@@ -173,11 +173,11 @@ var PriceProvider = {
 	 * @param  {Function} callback callback function to pipe the price to
 	 * @return {Float}            items price
 	 */
-	getPriceFor: function(itemName, appId, callback){
+	getPriceFor: function(itemName, appId, callback, fallback){
 		if(!this.cache) throw "No prices cached...";
-		if(!this.cache[appId][itemName]) throw "Requested item not found (" + appId + "/" + itemName + ")"; //Possibly report back and / or fallback to loading from market?
+		if(!this.cache[appId][itemName] && fallback) throw "Requested item not found (" + appId + "/" + itemName + ")"; //Possibly report back and / or fallback to loading from market?
 
-		var p = parseFloat(this.cache[appId][itemName]) / 100;
+		var p = parseFloat(this.cache[appId][itemName] || fallback) / 100;
 
 		p = ConversionRateProvider.convert(p, this.destinationCurrency);
 		if(callback) callback(null, p);
@@ -247,7 +247,7 @@ SteamItem.prototype.getPrice = function(refresh, callback){
 		callback = refresh;
 		refresh = false;
 	}
-	var p = PriceProvider.getPriceFor(this.name, this.appid, callback);
+	var p = PriceProvider.getPriceFor(this.name, this.appid, callback, 0.06);
 	if(callback) callback(null, p);
 	return p;
 };
@@ -679,7 +679,7 @@ LoungeStats.loadStats = function(){
 			//Go trough each account requested to merge
 			useaccs.forEach(function(acc){
 				//Do not merge the current account from cache
-				//if(acc == LoungeStats.Lounge.currentAccountId) return;
+				if(acc == LoungeStats.Lounge.currentAccountId) return;
 				//get all bets for that acount
 				$.each(LoungeStats.getCachedBetHistory(acc), function(key, value){
 					//If no bet was placed on a game for the current account lets just use the one from the other acc merged
@@ -893,7 +893,7 @@ LoungeStats.loadStats = function(){
 
 		$('#loungestats_screenshotbutton').click(function(){
 			if($('#loungestats_screenshotbutton').text() != "Screenshot") return;
-			alert("The Screenshot will be taken in 4 Seconds so that you can Hover a bet if you want to...\n\n You can also quickly put the graph in Fullscreen mode!");
+			alert("The Screenshot will be taken in 4 seconds so that you can hover a bet if you want to...\n\n You can also quickly put the graph in Fullscreen mode!");
 			$('#loungestats_screenshotbutton').text("Waiting");
 			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting.")}, 1000);
 			setTimeout(function(){$('#loungestats_screenshotbutton').text("Waiting..")}, 2000);
@@ -952,15 +952,15 @@ LoungeStats.loadStats = function(){
 
 				new ImgurUploader().uploadFromCanvas(newCanvas, "LoungeStats Profit Graph Autoupload", "Visit http://reddit.com/r/LoungeStats for more infos!", function(err, imagelink){
 					$('#loungestats_screenshotbutton').text("Screenshot");
-					if(err) return alert("Sorry, uploading the image to imgur failed :(\n\nTry it again in a second and doublecheck that imgur is up!");
+					if(err) return alert("Sorry, uploading the image to Imgur failed :(\n\nTry it again in a second and doublecheck that Imgur is up!");
 
 					var myPopup = window.open(response.data.link, "", "directories=no,height="+h+",width="+w+",menubar=no,resizable=no,scrollbars=no,status=no,titlebar=no,top=0,location=no");
 					if (!myPopup){
-						alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+						alert("Your Screenshot was uploaded, but it looks like your browser blocked the PopUp!");
 					} else {
 						myPopup.onload = function() {
 							setTimeout(function() {
-								if (myPopup.screenX === 0) alert("Your Screenshot was uploaded, but looks like your browser blocked the PopUp!");
+								if (myPopup.screenX === 0) alert("Your Screenshot was uploaded, but it looks like your browser blocked the Popup!");
 							}, 0);
 						};
 					}
