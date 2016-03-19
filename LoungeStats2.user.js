@@ -787,7 +787,7 @@ LoungeStats.loadStats = function(){
 				betData = [],
 
 				absoluteIndex = 0,
-				betsKeys = Object.keys(bets).sort(function(a, b){return parseInt(a) - parseInt(b);});
+				betsKeys = Object.keys(bets).sort(function(a, b){return bets[a].betDate - bets[b].betDate;});
 
 		if(!betsKeys.length) return $('#loungestats_datacontainer').html('Looks like you dont have any bets with the set criteria');
 
@@ -867,7 +867,7 @@ LoungeStats.loadStats = function(){
 					betChangeDelta = '+'+betChangeDelta.toFixed(2);
 				}else{
 					//loss
-					if(betChangeDelta < biggestloss) {
+					if(betChangeDelta * -1 > biggestloss) {
 						biggestloss = betChangeDelta * -1;
 						biggestlossid = bet.matchId;
 					}
@@ -918,7 +918,7 @@ LoungeStats.loadStats = function(){
 
 			$('#loungestats_profitgraph').bind('jqplotDataClick',
 				function (ev, seriesIndex, pointIndex) {
-					window.open('/match?m='+bets[betsKeys[pointIndex]].matchid, '_blank');
+					window.open('/match?m='+betsKeys[pointIndex], '_blank');
 				}
 			);
 
