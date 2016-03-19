@@ -416,7 +416,7 @@ LoungeClass.prototype.getBetHistory = function(callback) {
 			var preParsedBetdata = $(betData.split('</tbody>')[0]+archivedBetData.split('<tbody>')[1]).find('tr');
 
 			//Iterate bets from the end so oldest bets are first, step = 2 since theres always a row with bet info, then the won items, then the lost items, so 3 rows per bet
-			for(var i = preParsedBetdata.length-3; i > 0; i -= 3){
+			for(var i = preParsedBetdata.length-3; i >= 0; i -= 3){
 				var bhistoryentry = new this.betHistoryEntry($(preParsedBetdata[i]), $(preParsedBetdata[i + 1]), $(preParsedBetdata[i + 2]), this.currentAppid);
 				parsedBetdata[bhistoryentry.matchId] = bhistoryentry;
 			}
