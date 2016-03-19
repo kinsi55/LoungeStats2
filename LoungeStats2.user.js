@@ -787,7 +787,7 @@ LoungeStats.loadStats = function(){
 				betData = [],
 
 				absoluteIndex = 0,
-				betsKeys = Object.keys(bets).sort(function(a, b){return parseInt(a) - parseInt(b);});
+				betsKeys = Object.keys(bets).sort(function(a, b){return bets[a].betDate - bets[b].betDate;});
 
 		if(!betsKeys.length) return $('#loungestats_datacontainer').html('Looks like you dont have any bets with the set criteria');
 
