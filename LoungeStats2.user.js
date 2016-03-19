@@ -867,8 +867,8 @@ LoungeStats.loadStats = function(){
 					betChangeDelta = '+'+betChangeDelta.toFixed(2);
 				}else{
 					//loss
-					if(Math.abs(betChangeDelta) > biggestloss) {
-						biggestloss = Math.abs(betChangeDelta);
+					if(betChangeDelta * -1 > biggestloss) {
+						biggestloss = betChangeDelta * -1;
 						biggestlossid = bet.matchId;
 					}
 
