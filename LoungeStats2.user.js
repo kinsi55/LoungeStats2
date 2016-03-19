@@ -918,7 +918,7 @@ LoungeStats.loadStats = function(){
 
 			$('#loungestats_profitgraph').bind('jqplotDataClick',
 				function (ev, seriesIndex, pointIndex) {
-					window.open('/match?m='+bets[betsKeys[pointIndex]].matchid, '_blank');
+					window.open('/match?m='+betsKeys[pointIndex], '_blank');
 				}
 			);
 
