@@ -258,26 +258,57 @@ var PriceProviderExact = {
 			callback(null, parseFloat(this.cache[appId][itemName][dateTime]) / 100);
 		}else{
 			var tstart = new Date().getTime();
-			$.ajax({
-				url: "http://steam.expert/api/items/history/archive",
+
+			var itm = {}; itm[dateTime] = itemName;
+
+			GM_xmlhttpRequest({
+				method: "POST",
+				url: "https://steam.expert/api/items/history/archive",
+				data: JSON.stringify( {appid: appId, items: itm} ),
+				headers: {
+					"User-Agent": "LoungeStats/"+version,
+					"Content-Type": "application/json",
+					"Accept": "application/json"
+				},
+				onload: function(response) {
+					var parsed = JSON.parse(response.responseText);
+
+					if(!this.cache[appId][itemName]) this.cache[appId][itemName] = {};
+
+					if(!parsed.items && !parsed.data) return callback("Failed to load Price from API (API Error)");
+
+					console.log(parsed);
+
+					var price = parsed.items[dateTime][itemName];
+
+					this.cache[appId][itemName][dateTime] = parseFloat(price);
+
+					tstart = new Date().getTime() - tstart;
+
+					if(tstart > 1000 / maxRate){
+						callback(null, this.cache[appId][itemName][dateTime]);
+					}else{
+						setTimeout(callback, 1000 / (maxRate - tstart), null, this.cache[appId][itemName][dateTime])
+					}
+				}.bind(this),
+				onerror: function(){
+					if(callback) callback("Failed to load Price from API (HTTP Error)");
+				}
+			});
+
+			/*$.ajax({
+				url: "https://steam.expert/api/items/history/archive",
 				dataType: "json",
 				method: "POST",
-				data: {appid: appId, items: {itemName}}
+				processData: false,
+				crossDomain: true,
+				data: JSON.stringify( {appid: appId, items: {dateTime: [itemName]}} ),
+				contentType: 'application/json'
 			}).done(function(parsed) {
-				if(!this.cache[appId][itemName]) this.cache[appId][itemName] = {};
 
-				this.cache[appId][itemName][dateTime] = parseFloat(parsed.price_usd) / 100;
-
-				tstart = new Date().getTime() - tstart;
-
-				if(tstart > 1000 / maxRate){
-					callback(null, this.cache[appId][itemName][dateTime]);
-				}else{
-					setTimeout(callback, 1000 / (maxRate - tstart), null, this.cache[appId][itemName][dateTime])
-				}
 			}).error(function(){
 				if(callback) callback("Failed to load Price from API (HTTP Error)");
-			});
+			});*/
 		}
 	},
 	/**
@@ -290,7 +321,7 @@ var PriceProviderExact = {
 			this.cache = JSON.parse(this.cache);
 		}catch(e){}
 
-		if(!this.cache) this.cache = {'570': {}, '730': {}};
+		if(!this.cache || !this.cache["730"]) this.cache = {'570': {}, '730': {}};
 
 		callback();
 	},
@@ -308,7 +339,7 @@ var PriceProviderExact = {
 	 * How many querys per second can you send to this priceprovider?
 	 * @type {Number}
 	 */
-	maxRate: 4,
+	maxRate: 8,
 	/**
 	 * What currency does this provider return?
 	 * @type {String}
@@ -796,7 +827,11 @@ LoungeStats.loadStats = function(){
 				lastDate = bets[betsKeys[betsKeys.length - 1]].betDate.getTime(),
 				lastDateHi = lastDate * 1.0001;
 
+		var GameProgress = 0;
+
 		async.eachSeries(betsKeys, function(key, betsKeysEachCallback){
+			$('#loungestats_datacontainer').html("Loading Infos for Bet " + ++GameProgress + " of " + betsKeys.length);
+
 			var bet = bets[key],
 					betValue = 0.0,
 					betChangeDelta = 0.0,
