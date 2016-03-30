@@ -112,7 +112,7 @@ var ConversionRateProvider = {
     if(!this.cache) throw "No prices cached...";
     if(!from_currency) from_currency = "USD";
     if(!this.cache.rates[to_currency]) throw "Unknown destination currency";
-    console.log(amount, to_currency, from_currency, this.cache.rates)
+    //console.log(amount, to_currency, from_currency, this.cache.rates)
     if(!this.cache.rates[from_currency]) throw "Unknown source currency";
 
     return amount / this.cache.rates[from_currency] * this.cache.rates[to_currency];
@@ -269,11 +269,13 @@ var PriceProviderExact = {
         callbackValue = {};
 
     async.reject(items, function itemNotCached(item, cb){
-      var isCached = price_provider.cache && price_provider.cache[appId] && price_provider.cache[appId][item[0]] && price_provider.cache[appId][item[1]];
+      var dt_s = item[1].getFullYear()+"-"+("0"+(item[1].getMonth()+1)).slice(-2)+"-"+("0"+item[1].getDate()).slice(-2);
+
+      var isCached = price_provider.cache && price_provider.cache[appId] && price_provider.cache[appId][item[0]] && price_provider.cache[appId][item[0]][dt_s];
 
       if(!callbackValue[item[0]]) callbackValue[item[0]] = {};
 
-      if(isCached) callbackValue[item[0]][item[1]] = price_provider.cache[appId][item[1]];
+      if(isCached) callbackValue[item[0]][dt_s] = price_provider.cache[appId][item[0]][dt_s];
 
       cb(isCached);
     }, function(toCache){
@@ -798,7 +800,12 @@ LoungeStats.loadStats = function(){
   $('#loungestats_settingsbutton').click(LoungeStats.Settings.show);
 
   LoungeStats.Lounge.getBetHistory(function(err, bets){
-    if(err) return $('#ajaxCont').html(err);
+    if(err){
+      return $('#ajaxCont').html(err);
+
+      //Possibly use cached history if loading live data failed?
+      //LoungeStats.getCachedBetHistory(acc)
+    }
 
     LoungeStats.cacheBetHistory(bets);
 
