@@ -795,8 +795,8 @@ LoungeStats.loadStats = function(){
 		<a class="button" target="_blank" href="https://steamcommunity.com/tradeoffer/new/?partner=33309635&token=H0lCbkY3">Donate ♥</a> \
 												<a class="button" target="_blank" href="https://reddit.com/r/LoungeStats">Subreddit</a> \
 												<a id="loungestats_resetzoombutton" class="button hideuntilready">Reset Zoom</a> \
-												<a id="loungestats_screenshotbutton" class="button hideuntilready">Screenshot</a> \
-												<a id="loungestats_csvexport" class="button hideuntilready">Export CSV (Excel)</a> \
+												Screenshot & CSV Export not implemented atm.<!--<a id="loungestats_screenshotbutton" class="button hideuntilready">Screenshot</a> \
+												<a id="loungestats_csvexport" class="button hideuntilready">Export CSV (Excel)</a>--> \
 												<br><hr><br> \
 												<div id="loungestats_datacontainer"> \
 													<img src="/img/load.gif" id="loading" style="margin: 0.75em 2%"> \
