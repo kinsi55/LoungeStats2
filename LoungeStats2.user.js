@@ -24,7 +24,7 @@
 // @grant       GM_listValues
 // ==/UserScript==
 
-// You are not allowed to share modified versions of this script, or use parts of it without the authors permission
+// Please do not share modified versions of this script. If you have idea to make this better send a Pullrequest!
 // You are not allowed to sell the whole, or parts of this script
 // Copyright belongs to "Kinsi" (user Kinsi55 on reddit, /id/kinsi on steam)
 
@@ -285,7 +285,7 @@ var PriceProviderExact = _.defaults({
 
 			if(!precaching && isCached) callbackValue[item[0]][dt_s] = price_provider.cache[appId][item[0]][dt_s];
 
-			return !precaching && isCached;
+			return isCached;
 		});
 
 		if(toCache.length) {
@@ -364,7 +364,7 @@ var PriceProviderExact = _.defaults({
 			this.cache = JSON.parse(this.cache);
 		}catch(e){}
 
-		if(!this.cache || !this.cache["730"]) this.cache = {'570': {}, '730': {}};
+		if(!this.cache || !this.cache["730"] || true) this.cache = {'570': {}, '730': {}};
 
 		callback();
 	},
@@ -727,7 +727,14 @@ LoungeStatsClass.prototype = {
 		/*var availablePriceProviders = {"Fast": {interface: PriceProviderFast, description: "Uses recent prices for any bet, even those made in the past"},
 															 "Exact": {interface: PriceProviderExact, description: "Gets historical prices for items from the time they were bet. Takes longer to load but is way more accurate."}}*/
 
-		PriceProvider = availablePriceProviders[this.Settings.method.value].interface;
+		PriceProvider = availablePriceProviders[this.Settings.method.value];
+
+		if(!PriceProvider){
+			PriceProvider = availablePriceProviders["Exact"];
+			this.Settings.method.value = "Exact";
+		}
+
+		PriceProvider = PriceProvider.interface;
 
 		callback();
 	},
