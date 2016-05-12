@@ -21,7 +21,6 @@
 // @grant       GM_addStyle
 // @grant       GM_getValue
 // @grant       GM_setValue
-// @grant       GM_listValues
 // ==/UserScript==
 
 // Please do not share modified versions of this script. If you have idea to make this better send a Pullrequest!
@@ -30,8 +29,56 @@
 
 'use strict';
 
+var SETTING_PREFIX = "LS2_";
+
+var GM_addStyle = GM_addStyle,
+		GM_setValue = GM_setValue,
+		GM_getValue = GM_getValue,
+		GM_xmlhttpRequest = GM_xmlhttpRequest,
+		GM_getValue = GM_getValue;
+
+//If the Extension is ran inside an Chrome Extension we must create wrapper functions as Userscript support is still included.
+//Required chrome permissions: storage, unlimitedStorage, webRequest, https://steam.expert, https://api.fixer.io, https://raw.githubusercontent.com/,
+if(window.chrome && chrome.runtime && chrome.runtime.id){
+	GM_addStyle = function(style){
+		$("head").append($("<style>").html(style));
+	};
+
+	GM_setValue = function(key, val, cb){
+		var x = {};
+		x[key] = val;
+		chrome.storage.local.set(x, cb);
+	};
+
+	GM_getValue = function(key, cb){
+		chrome.storage.local.get(key, function(val) {
+			cb(val[key]);
+		});
+	};
+
+	GM_xmlhttpRequest = function(data){
+		var xhr = new XMLHttpRequest();
+		xhr.open(data.method || "GET", data.url, true);
+		xhr.onreadystatechange = function() {
+			if (xhr.readyState == 4) data.onload(xhr);
+		};
+		xhr.send();
+	};
+
+	GM_info = {script: {version: "2.0.0"}};
+}else if(GM_setValue && GM_info && GM_xmlhttpRequest && GM_addStyle){
+	var GM_getValue_orig = GM_getValue;
+
+	GM_getValue = function(key, cb){
+		cb(GM_getValue_orig(key));
+	};
+}else{
+	alert("Your Userscript plugin seems to be incompatible with LoungeStats2.");
+	return;
+}
+
 var version = GM_info.script.version;
-var newVersion = (GM_getValue('lastversion') != version);
+var newVersion = false; GM_getValue(SETTING_PREFIX+'lastversion', function(val){newVersion = (val != version);});
 
 var APP_CSGO = '730';
 var APP_DOTA = '570';
@@ -132,34 +179,44 @@ var ConversionRateProvider = {
 	 * @param  {Function} callback callback when done
 	 */
 	init: function(callback){
-		this.cache = GM_getValue("convert_fixer");
-		if(this.cache) try{
-			this.cache = JSON.parse(this.cache);
-		}catch(e){ this.cache = null; }
-
-		if(!this.cache || (new Date().getTime() - Number(GM_getValue("fixer_lastload") || 0)) > 259200000){
-			$.ajax({
-				url: "https://api.fixer.io/latest?base=USD",
-				dataType: "json"
-			}).done(function(parsed) {
-				if(parsed.base === "USD"){
-					parsed.rates["USD"] = 1.0;
-					GM_setValue("convert_fixer", JSON.stringify(parsed));
-					this.cache = parsed;
-				}
-
-				if(!this.cache) return callback("Couldnt load exchange rates from fixer..");
-
-				GM_setValue('fixer_lastload', new Date().getTime());
-
-				if(callback) callback();
-			}).error(function(){
-				if(callback) callback("Couldnt load pricedb from repo..");
+		async.waterfall([
+		function getLastLoadTime(cb){
+			GM_getValue(SETTING_PREFIX+"fixer_lastload", function(val){
+				cb(null, Number(val) || 0);
 			});
-		}else{
-			this.cache = JSON.parse(GM_getValue("convert_fixer"));
-			if(callback) callback();
-		}
+		},
+		function getCachedFixer(lastload, cb){
+			GM_getValue(SETTING_PREFIX+"convert_fixer", function(val){
+				cb(null, lastload, val);
+			});
+		},
+		function initialize(lastload, cached, cb){
+			this.cache = cached;
+			if(this.cache) try{
+				this.cache = JSON.parse(this.cache);
+			}catch(e){ this.cache = null; }
+
+			if(!this.cache || new Date().getTime() - lastload > 259200000){
+				$.ajax({
+					url: "https://api.fixer.io/latest?base=USD",
+					dataType: "json"
+				}).done(function(parsed) {
+					if(parsed.base === "USD"){
+						parsed.rates.USD = 1.0;
+						GM_setValue(SETTING_PREFIX+"convert_fixer", JSON.stringify(parsed));
+						this.cache = parsed;
+					}
+
+					if(!this.cache) return cb("Couldnt load exchange rates from fixer..");
+
+					GM_setValue(SETTING_PREFIX+'fixer_lastload', new Date().getTime());
+
+					cb();
+				}).error(function(){
+					cb("Couldnt load pricedb from repo..");
+				});
+			}else cb();
+		}.bind(this)], callback);
 	}
 };
 
@@ -196,7 +253,7 @@ var _PriceProvider = {
 	 * Load the locally cached, or externally refreshed price DB in and load it into RAM
 	 * @param  {Function} callback callback when done
 	 */
-	init: function(callback){callback()},
+	init: function(callback){callback();},
 	/**
 	 * Called upon Application exit. Useful to cache dynamically loaded stuff etc.
 	 * @param  {Function} callback Call this when done doing stuff.
@@ -234,33 +291,43 @@ var PriceProviderFast = _.defaults({
 		if(callback) callback(null, p);
 	},
 	init: function(callback){
-		this.cache = GM_getValue('pricedb');
-		if(this.cache) try{
-			this.cache = JSON.parse(this.cache);
-		}catch(e){ this.cache = null; }
-		//if the cache is older than 48 hours re-load it
-		if(!this.cache || (new Date().getTime() - Number(GM_getValue('pricedb_lastload') || 0)) > 518400000){
-			//Load latest price database from github and cache it
-			$.ajax({
-				url: "https://raw.githubusercontent.com/kinsi55/LoungeStats2/master/misc/pricedb.json",
-				dataType: "json"
-			}).done(function(parsed){
-				if(parsed[APP_CSGO] && parsed[APP_DOTA]){
-					GM_setValue("pricedb", JSON.stringify(parsed));
-					this.cache = parsed;
-				}
-
-				if(!this.cache || this.cache.success !== 1) return callback("Couldnt load pricedb from repo..");
-
-				GM_setValue('pricedb_lastload', new Date().getTime());
-
-				if(callback) callback();
-			}).error(function(){
-				if(callback) callback("Couldnt load pricedb from repo..");
+		async.waterfall([
+		function getLastLoadTime(cb){
+			GM_getValue(SETTING_PREFIX+"pricedb_lastload", function(val){
+				cb(null, Number(val) || 0);
 			});
-		}else{
-			if(callback) callback();
-		}
+		},
+		function getCachedFixer(lastload, cb){
+			GM_getValue(SETTING_PREFIX+"pricedb", function(val){
+				cb(null, lastload, val);
+			});
+		},
+		function initialize(lastload, cached, cb){
+			this.cache = cached;
+			if(this.cache) try{
+				this.cache = JSON.parse(this.cache);
+			}catch(e){ this.cache = null; }
+
+			if(!this.cache || new Date().getTime() - lastload > 259200000){
+				$.ajax({
+					url: "https://raw.githubusercontent.com/kinsi55/LoungeStats2/master/misc/pricedb.json",
+					dataType: "json"
+				}).done(function(parsed) {
+					if(parsed[APP_CSGO] && parsed[APP_DOTA]){
+						GM_setValue(SETTING_PREFIX+"pricedb", JSON.stringify(parsed));
+						this.cache = parsed;
+					}
+
+					if(!this.cache || this.cache.success !== 1) return cb("Couldnt load pricedb from repo..");
+
+					GM_setValue(SETTING_PREFIX+'pricedb_lastload', new Date().getTime());
+
+					cb();
+				}).error(function(){
+					cb("Couldnt load pricedb from repo..");
+				});
+			}else cb();
+		}.bind(this)], callback);
 	}
 }, _PriceProvider);
 
@@ -359,23 +426,27 @@ var PriceProviderExact = _.defaults({
 		});
 	},
 	init: function(callback){
-		this.cache = GM_getValue("pricecache_exact");
-		if(this.cache) try{
-			this.cache = JSON.parse(this.cache);
-		}catch(e){}
+		GM_getValue(SETTING_PREFIX+"pricecache_exact", function(val){
+			this.cache = val;
 
-		if(!this.cache || !this.cache["730"] || true) this.cache = {'570': {}, '730': {}};
+			if(this.cache) try{
+				this.cache = JSON.parse(this.cache);
+			}catch(e){}
 
-		callback();
+			//TODO remove || true, currently forces a price reload from this provider every time reloading the site. Not really bad considering "supportsPrecaching", but possibly unwanted.
+			if(!this.cache || !this.cache["730"] || true) this.cache = {'570': {}, '730': {}};
+
+			callback();
+		}.bind(this));
 	},
 	destroy: function(callback){
 		try{
-			GM_setValue('pricecache_exact', JSON.stringify(this.cache));
+			GM_setValue(SETTING_PREFIX+'pricecache_exact', JSON.stringify(this.cache));
 		}catch(e){}
 		if(callback) callback();
 	},
 	maxRate: 6,
-	supportsPrecaching: 1000
+	supportsPrecaching: 1500
 }, _PriceProvider);
 
 var availablePriceProviders = {"Fast": {interface: PriceProviderFast, description: "Uses recent prices for any bet, even those made in the past"},
@@ -507,7 +578,9 @@ var LoungeStatsClass = function(){
 		this.fieldid = fieldid || json;
 		if(this.fieldid === this.json) this.fieldid = undefined;
 
-		this._val = GM_getValue('setting_'+this.name);
+		GM_getValue(SETTING_PREFIX+'setting_'+this.name, function(val){
+			this._val = val;
+		}.bind(this));
 
 		if(this._val && this.json) this._val = JSON.parse(this._val);
 	};
@@ -526,8 +599,8 @@ var LoungeStatsClass = function(){
 		 */
 		set value(newValue){
 			this._val = newValue;
-			if(!this.json) GM_setValue('setting_'+this.name, this._val);
-			if(this.json) GM_setValue('setting_'+this.name, JSON.stringify(this._val));
+			if(!this.json) GM_setValue(SETTING_PREFIX+'setting_'+this.name, this._val);
+			if(this.json) GM_setValue(SETTING_PREFIX+'setting_'+this.name, JSON.stringify(this._val));
 		},
 		populateFormField: function(){
 			if(this.fieldid && !this.json && this._val) $('.loungestatsSetting#'+this.name).val(this._val);
@@ -568,7 +641,7 @@ var LoungeStatsClass = function(){
 		}
 
 		var x = this.Settings.accounts.value;
-		x.active[this.Lounge.currentAppid] = $("#loungestats_mergepicks input:checked").map(function(){return $(this).attr("name")}).toArray();
+		x.active[this.Lounge.currentAppid] = $("#loungestats_mergepicks input:checked").map(function(){return $(this).attr("name");}).toArray();
 		this.Settings.accounts.value = x;
 
 		this.Settings.close();
@@ -719,8 +792,15 @@ LoungeStatsClass.prototype = {
 		ls_settingswindow.click(function(e) {e.stopPropagation(); $('.calendar').css('display', 'none');});
 
 		//Predefine settings on first load
-		if(!this.Settings.accounts.value) this.Settings.accounts.value = {available: {'570': {}, '730': {}},
-																																			active:    {'570': [], '730': []}};
+		if(!this.Settings.accounts.value){
+			this.Settings.accounts.value = {available: {'570': {}, '730': {}},
+																			active:    {'570': [], '730': []}};
+		}
+
+		if(!this.Settings.currency.value){
+			this.Settings.currency.value = "USD";
+			this.Settings.method.value = undefined;
+		}
 
 		$(document).on('click', 'a#loungestats_settingsbutton', this.Settings.show);
 
@@ -784,6 +864,8 @@ LoungeStatsClass.prototype = {
 var LoungeStats = new LoungeStatsClass();
 
 LoungeStats.loadStats = function(){
+	console.log(LoungeStats.Settings.method.value);
+
 	if(!LoungeStats.Settings.method.value){
 		$('#ajaxCont').html('Please set up Loungestats first');
 		return LoungeStats.Settings.show();
@@ -803,7 +885,7 @@ LoungeStats.loadStats = function(){
 												</div>');
 
 	if(newVersion) {
-		GM_setValue('lastversion', version);
+		GM_setValue(SETTING_PREFIX+'lastversion', version);
 		$('#ajaxCont').prepend('<div id="loungestats_updateinfo" class="bpheader">LoungeStats was updated to ' + version + '!<br/>Please make sure to check <a href="http://reddit.com/r/loungestats">the subreddit</a> to see what changes were made!</div>');
 	}
 
@@ -840,7 +922,18 @@ LoungeStats.loadStats = function(){
 			});
 		}
 
+		var bits = (LoungeStats.Settings.beforedate.value || "01.01.2000").split('.');
+		var hidebefore = new Date(bits[2], bits[1]-1, bits[0]).getTime();
+
+		//Sort the Bets by Betdate
 		var betsKeys = Object.keys(bets).sort(function(a, b){return bets[a].betDate - bets[b].betDate;});
+
+		//Filter out Bets made before the hide bets before setting
+
+		betsKeys = _.reject(betsKeys, function(k){
+			console.log(bets[k].betDate.getTime(), hidebefore, bets[k].betDate.getTime() - hidebefore);
+			return bets[k].betDate.getTime() < hidebefore;
+		});
 
 		async.series([
 		function precachePrices(callback){
@@ -882,6 +975,8 @@ LoungeStats.loadStats = function(){
 					absoluteIndex = 0;
 
 			if(!betsKeys.length) return $('#loungestats_datacontainer').html('Looks like you dont have any bets with the set criteria');
+
+			if(betsKeys.length === 1) alert('There is only one bet with the set criteria, you need at least two to be able to see a graph.');
 
 			var firstDate = bets[betsKeys[0]].betDate.getTime(),
 					firstDateLo = firstDate * 0.9999,
