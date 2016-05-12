@@ -76,7 +76,7 @@ if(window.chrome && chrome.runtime && chrome.runtime.id){
 
 	GM_setValue = function(key, value, cb){
 		GM_setValue_orig(key, value);
-		cb();
+		if(cb) cb();
 	};
 }else{
 	alert("Your Userscript plugin seems to be incompatible with LoungeStats2.");
@@ -914,7 +914,7 @@ LoungeStats.loadStats = function(){
 				//Do not merge if the proposed to-merge account is the currently logged in one
 				if(acc == LoungeStats.Lounge.currentAccountId) return;
 				//get all bets for that acount, using lodash here to be sync instead of async
-				_.forIn(LoungeStats.getCachedBetHistory(acc), function(key, value) {
+				_.forIn(LoungeStats.getCachedBetHistory(acc), function(value, key) {
 					//If no bet was placed on a game for the current account lets just use the one from the other acc merged
 					if(!bets[key]) {
 						bets[key] = value;
