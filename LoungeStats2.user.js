@@ -68,9 +68,15 @@ if(window.chrome && chrome.runtime && chrome.runtime.id){
 	GM_info = {script: {version: "2.0.0"}};
 }else if(GM_setValue && GM_info && GM_xmlhttpRequest && GM_addStyle){
 	var GM_getValue_orig = GM_getValue;
+	var GM_setValue_orig = GM_setValue;
 
 	GM_getValue = function(key, cb){
 		cb(GM_getValue_orig(key));
+	};
+
+	GM_setValue = function(key, value, cb){
+		GM_setValue_orig(key, value);
+		cb();
 	};
 }else{
 	alert("Your Userscript plugin seems to be incompatible with LoungeStats2.");
@@ -441,9 +447,8 @@ var PriceProviderExact = _.defaults({
 	},
 	destroy: function(callback){
 		try{
-			GM_setValue(SETTING_PREFIX+'pricecache_exact', JSON.stringify(this.cache));
-		}catch(e){}
-		if(callback) callback();
+			GM_setValue(SETTING_PREFIX+'pricecache_exact', JSON.stringify(this.cache), callback);
+		}catch(e){if(callback) callback(e);}
 	},
 	maxRate: 6,
 	supportsPrecaching: 1500
