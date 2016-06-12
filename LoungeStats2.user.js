@@ -376,7 +376,7 @@ var PriceProviderExact = _.defaults({
 
 			GM_xmlhttpRequest({
 				method: "POST",
-				url: "https://steam.expert/api/items/history/archive",
+				url: "https://steam.expert/api/items/prices/archive",
 				data: JSON.stringify( {appid: appId, items: toCacheNew} ),
 				headers: {
 					"User-Agent": "LoungeStats2/"+version,
@@ -1021,10 +1021,7 @@ LoungeStats.loadStats = function(){
 				});
 
 				async.retry({times: 5, interval: 500}, function(cb){
-					PriceProvider.getPricesFor(toLoad, LoungeStats.Lounge.currentAppid, function(e, a){
-						console.log(e, a);
-						cb(e,a);
-					});
+					PriceProvider.getPricesFor(toLoad, LoungeStats.Lounge.currentAppid, cb);
 				}, function processPricesReply(err, prices){
 					//Price loaded fine? Add the price to the relevant variable
 					if(!err){
